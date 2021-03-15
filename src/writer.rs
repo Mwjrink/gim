@@ -1,6 +1,9 @@
 use core::panic;
 use rand::Rng;
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    thread::current,
+};
 use std::{fs::File, io::prelude::*};
 
 type Triangle = [u32; 3];
@@ -66,6 +69,7 @@ pub fn write(obj_file: &String) {
         // create data structure that can be referenced to find which indices are included in which triangles
         let mut edges = HashMap::<Edge, Edge>::with_capacity(mesh.num_face_indices.len() * 24);
         let mut tris = HashSet::<Triangle>::with_capacity(mesh.num_face_indices.len());
+        let mut vertices: HashMap<u32, Vec<u32>> = HashMap::new();
 
         println!("num_face_indices: {}", mesh.num_face_indices.len());
 
@@ -73,9 +77,9 @@ pub fn write(obj_file: &String) {
         for verts in &mesh.num_face_indices {
             {
                 let key: Edge = edge(mesh.indices[idx + 0], mesh.indices[idx + 1]);
-                let value = edges.insert(key, [mesh.indices[idx + 2], 0]);
+                let value = edges.insert(key, [mesh.indices[idx + 2], u32::MAX]);
                 if let Some(v) = value {
-                    if v[1] != 0 {
+                    if v[1] != u32::MAX {
                         println!("this edge has appeared more than twice: {:?}", key);
                     }
                     edges.insert(key, [mesh.indices[idx + 2], v[0]]);
@@ -83,9 +87,9 @@ pub fn write(obj_file: &String) {
             }
             {
                 let key: Edge = edge(mesh.indices[idx + 0], mesh.indices[idx + 2]);
-                let value = edges.insert(key, [mesh.indices[idx + 1], 0]);
+                let value = edges.insert(key, [mesh.indices[idx + 1], u32::MAX]);
                 if let Some(v) = value {
-                    if v[1] != 0 {
+                    if v[1] != u32::MAX {
                         println!("this edge has appeared more than twice: {:?}", key);
                     }
                     edges.insert(key, [mesh.indices[idx + 1], v[0]]);
@@ -93,143 +97,433 @@ pub fn write(obj_file: &String) {
             }
             {
                 let key: Edge = edge(mesh.indices[idx + 1], mesh.indices[idx + 2]);
-                let value = edges.insert(key, [mesh.indices[idx + 0], 0]);
+                let value = edges.insert(key, [mesh.indices[idx + 0], u32::MAX]);
                 if let Some(v) = value {
-                    if v[1] != 0 {
+                    if v[1] != u32::MAX {
                         println!("this edge has appeared more than twice: {:?}", key);
                     }
                     edges.insert(key, [mesh.indices[idx + 0], v[0]]);
                 }
             }
 
+            {
+                vertices
+                    .entry(mesh.indices[idx + 0])
+                    .or_insert(Vec::new())
+                    .push(mesh.indices[idx + 1]);
+                vertices
+                    .entry(mesh.indices[idx + 1])
+                    .or_insert(Vec::new())
+                    .push(mesh.indices[idx + 0]);
+                vertices
+                    .entry(mesh.indices[idx + 0])
+                    .or_insert(Vec::new())
+                    .push(mesh.indices[idx + 2]);
+                vertices
+                    .entry(mesh.indices[idx + 2])
+                    .or_insert(Vec::new())
+                    .push(mesh.indices[idx + 0]);
+                vertices
+                    .entry(mesh.indices[idx + 1])
+                    .or_insert(Vec::new())
+                    .push(mesh.indices[idx + 2]);
+                vertices
+                    .entry(mesh.indices[idx + 2])
+                    .or_insert(Vec::new())
+                    .push(mesh.indices[idx + 1]);
+            };
+
             tris.insert(tri(mesh.indices[idx + 0], mesh.indices[idx + 1], mesh.indices[idx + 2]));
 
             idx += *verts as usize;
         }
 
-        let tri_idx = rand::thread_rng().gen_range(0..mesh.num_face_indices.len());
-        let mut triangle = tri(
-            mesh.indices[tri_idx * 3 + 0],
-            mesh.indices[tri_idx * 3 + 1],
-            mesh.indices[tri_idx * 3 + 2],
-        );
-
-        if !tris.contains(&triangle) {
-            println!("random seed triangle not in the mesh");
+        let mut boundary_edges = Vec::<Edge>::new();
+        for e in &edges {
+            if e.1[1] == u32::MAX {
+                boundary_edges.push(e.0.clone());
+            }
         }
 
-        let mut inst_tris = Vec::<(Triangle, f32, Edge)>::with_capacity(3);
-
         let dist = |a: u32, b: u32| -> f32 {
-            let p1 = &mesh.positions[a as usize..(a + 2) as usize];
-            let p2 = &mesh.positions[b as usize..(b + 2) as usize];
+            let p1 = &mesh.positions[(a * 3) as usize..(a * 3 + 3) as usize];
+            let p2 = &mesh.positions[(b * 3) as usize..(b * 3 + 3) as usize];
 
-            f32::sqrt(f32::powf(p1[0] - p2[0], 2.0) + f32::powf(p1[0] - p2[0], 2.0) + f32::powf(p1[0] - p2[0], 2.0))
+            f32::sqrt((p1[0] - p2[0]).powf(2.0) + (p1[1] - p2[1]).powf(2.0) + (p1[2] - p2[2]).powf(2.0))
         };
 
-        println!("{} total edges before removal", edges.len());
+        // println!("part 1.0, cut edges and triangles: begins");
+        // {
+        //     let tri_idx = rand::thread_rng().gen_range(0..mesh.num_face_indices.len());
+        //     let mut triangle = tri(
+        //         mesh.indices[tri_idx * 3 + 0],
+        //         mesh.indices[tri_idx * 3 + 1],
+        //         mesh.indices[tri_idx * 3 + 2],
+        //     );
+        //
+        //     if !tris.contains(&triangle) {
+        //         println!("random seed triangle not in the mesh");
+        //     }
+        //
+        //     let mut inst_tris = Vec::<(Triangle, f32, Edge)>::with_capacity(3);
+        //
+        //     println!("{} total edges before removal", edges.len());
+        //
+        //     let mut removable_edges = Vec::<Edge>::new();
+        //
+        //     'part_one: loop {
+        //         if !tris.remove(&triangle) {
+        //             println!("this is not possible, loop triangle not in the mesh");
+        //         }
+        //
+        //         // find the adjacent tris
+        //         {
+        //             let edg = edge(triangle[0], triangle[1]);
+        //             if let Some(value) = edges.get(&edg) {
+        //                 let idx = if value[0] == triangle[2] { 1 } else { 0 };
+        //                 let push_trig = tri(triangle[0], triangle[1], value[idx]);
+        //                 if tris.contains(&push_trig) {
+        //                     // this distance is the distance between the points not on the edge itself
+        //                     inst_tris.push((push_trig, dist(triangle[2], value[idx]), edg));
+        //                 }
+        //             }
+        //         };
+        //
+        //         {
+        //             let edg = edge(triangle[0], triangle[2]);
+        //             if let Some(value) = edges.get(&edg) {
+        //                 let idx = if value[0] == triangle[1] { 1 } else { 0 };
+        //                 let push_trig = tri(triangle[0], triangle[2], value[idx]);
+        //                 if tris.contains(&push_trig) {
+        //                     inst_tris.push((push_trig, dist(triangle[1], value[idx]), edg));
+        //                 }
+        //             }
+        //         };
+        //
+        //         {
+        //             let edg = edge(triangle[1], triangle[2]);
+        //             if let Some(value) = edges.get(&edg) {
+        //                 let idx = if value[0] == triangle[0] { 1 } else { 0 };
+        //                 let push_trig = tri(triangle[1], triangle[2], value[idx]);
+        //                 if tris.contains(&push_trig) {
+        //                     inst_tris.push((push_trig, dist(triangle[0], value[idx]), edg));
+        //                 }
+        //             }
+        //         };
+        //
+        //         if inst_tris.len() == 0 {
+        //             'stack: while let Some(edge) = removable_edges.pop() {
+        //                 // remove edge and the triangle adjacent to it
+        //
+        //                 // check if there is another triangle attached to this edge
+        //                 // if the edge is not in the simplicial complex, it has already been removed and we can move to the next on the stack
+        //                 if let Some(value) = edges.get(&edge) {
+        //                     let idx = if triangle[0] != value[0] && triangle[1] != value[0] && triangle[2] != value[0] {
+        //                         0
+        //                     } else if triangle[0] != value[1] && triangle[1] != value[1] && triangle[2] != value[1] {
+        //                         1
+        //                     } else {
+        //                         panic!("this is not possible");
+        //                     };
+        //                     let push_trig = tri(edge[0], edge[1], value[idx]);
+        //                     if tris.contains(&push_trig) {
+        //                         // if there is: remove edge and set the triangle for the next loop iteration
+        //                         edges.remove(&edge);
+        //                         triangle = push_trig;
+        //                         continue 'part_one;
+        //                     }
+        //                 }
+        //             }
+        //
+        //             {
+        //                 println!("part 1.0, cut edges and triangles: complete");
+        //                 break 'part_one;
+        //             }
+        //         } else {
+        //             // three possible edges to remove from
+        //             // sort by distance to the current tri and choose the closest in the simplicial complex
+        //             inst_tris.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        //
+        //             // remove the corresponding edge
+        //             edges.remove(&inst_tris[0].2);
+        //
+        //             // and set the triangle for the next loop iteration
+        //             triangle = inst_tris[0].0;
+        //
+        //             if inst_tris.len() == 2 {
+        //                 removable_edges.push(inst_tris[1].2);
+        //             } else if inst_tris.len() == 3 {
+        //                 removable_edges.push(inst_tris[1].2);
+        //                 removable_edges.push(inst_tris[2].2);
+        //             }
+        //         }
+        //
+        //         // empty the temp to prep for next tri
+        //         inst_tris.clear();
+        //     }
+        // }
 
-        let mut removable_edges = Vec::<Edge>::new();
+        // Intermediate step to clean up remaining triangles
+        // println!("part 1.5, cut triangles: begins");
+        // {
+        //     let mut tri_vec: Vec<Triangle> = tris.iter().map(|t| t.clone()).collect();
+        //     let mut inst_tris = Vec::<(Triangle, f32, Edge)>::with_capacity(3);
+        //     let mut temp = Vec::<Triangle>::with_capacity(tri_vec.len());
+        //     'part_one_point_five: loop {
+        //         tri_vec.append(&mut temp);
+        //         temp.clear();
+        //         while let Some(triangle) = tri_vec.pop() {
+        //             {
+        //                 let edg = edge(triangle[0], triangle[1]);
+        //                 if let Some(value) = edges.get(&edg) {
+        //                     let idx = if value[0] == triangle[2] { 1 } else { 0 };
+        //                     let push_trig = tri(triangle[0], triangle[1], value[idx]);
+        //                     if value[idx] != u32::MAX && !tris.contains(&push_trig) {
+        //                         // this distance is the distance between the points not on the edge itself
+        //                         inst_tris.push((push_trig, dist(triangle[2], value[idx]), edg));
+        //                     }
+        //                 }
+        //             };
+        //
+        //             {
+        //                 let edg = edge(triangle[0], triangle[2]);
+        //                 if let Some(value) = edges.get(&edg) {
+        //                     let idx = if value[0] == triangle[1] { 1 } else { 0 };
+        //                     let push_trig = tri(triangle[0], triangle[2], value[idx]);
+        //                     if value[idx] != u32::MAX && !tris.contains(&push_trig) {
+        //                         inst_tris.push((push_trig, dist(triangle[1], value[idx]), edg));
+        //                     }
+        //                 }
+        //             };
+        //
+        //             {
+        //                 let edg = edge(triangle[1], triangle[2]);
+        //                 if let Some(value) = edges.get(&edg) {
+        //                     let idx = if value[0] == triangle[0] { 1 } else { 0 };
+        //                     let push_trig = tri(triangle[1], triangle[2], value[idx]);
+        //                     if value[idx] != u32::MAX && !tris.contains(&push_trig) {
+        //                         inst_tris.push((push_trig, dist(triangle[0], value[idx]), edg));
+        //                     }
+        //                 }
+        //             };
+        //
+        //             if inst_tris.len() != 0 {
+        //                 // three possible edges to remove from
+        //                 // sort by distance to the current tri and choose the closest in the simplicial complex
+        //                 inst_tris.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        //
+        //                 // remove the corresponding edge
+        //                 edges.remove(&inst_tris[0].2);
+        //
+        //             // tris.remove(triangle);
+        //             } else {
+        //                 temp.push(triangle);
+        //             }
+        //
+        //             // empty the temp to prep for next tri
+        //             inst_tris.clear();
+        //
+        //             tris.remove(&triangle);
+        //         }
+        //
+        //         if temp.is_empty() {
+        //             println!("part 1.5, cut triangles: complete");
+        //             break 'part_one_point_five;
+        //         }
+        //     }
+        // }
 
-        'part_one: loop {
-            if !tris.remove(&triangle) {
-                println!("this is not possible, loop triangle not in the mesh");
+        // let mut cut_vertices: HashMap<u32, Vec<u32>> = HashMap::new();
+        // for e in &edges {
+        //     cut_vertices.entry(e.0[0]).or_insert(Vec::new()).push(e.0[1]);
+        //     cut_vertices.entry(e.0[1]).or_insert(Vec::new()).push(e.0[0]);
+        // }
+
+        // second half of the algorithm, simplifying p
+        // println!("part 2.0, cut vertices: begins");
+        // 'part_two: loop {
+        //     let mut removed = false;
+        //     for e in &edges {
+        //         if cut_vertices.contains_key(&e.0[0]) && cut_vertices.contains_key(&e.0[1]) {
+        //             if cut_vertices.get(&e.0[0]).unwrap().len() == 1 {
+        //                 let value = cut_vertices.remove(&e.0[0]).unwrap();
+        //                 cut_vertices.entry(value[0]).and_modify(|v| {
+        //                     v.remove(v.iter().position(|&n| n == e.0[0]).unwrap());
+        //                 });
+        //
+        //                 removed = true;
+        //             }
+        //
+        //             if cut_vertices.get(&e.0[1]).unwrap().len() == 1 {
+        //                 let value = cut_vertices.remove(&e.0[1]).unwrap();
+        //                 cut_vertices.entry(value[0]).and_modify(|v| {
+        //                     v.remove(v.iter().position(|&n| n == e.0[1]).unwrap());
+        //                 });
+        //
+        //                 removed = true;
+        //             }
+        //         }
+        //     }
+        //
+        //     if !removed {
+        //         println!("part 2.0, cut vertices: complete");
+        //         break 'part_two;
+        //     }
+        // }
+
+        // if only a single vertex remains in p then add back two adjacent edges to p.
+        //     this happens if the mesh is entirely closed with no pre-existing boundary edges:
+        //     "For the case of a closed mesh of genus 0, the resulting ρ will consist of a single
+        //      vertex, since it has no loops. Because our parametrization requires that we map ρ'
+        //      onto a square, we add back to ρ two adjacent mesh edges."
+        //
+        // optimize the path to be smoother, less serrated, shortest path:
+        //     "we straighten each cut-path in ρ by computing a constrained
+        //      shortest path that connects its two adjacent cut-nodes and
+        //      stays within a neighborhood of the original cut-path."
+        //
+        // A vertex v with valence k in ρ is replicated as k vertices in ρ'. Vertices in ρ that have valence k != 2 in the cut are called cut-nodes. (We still refer to these as cut-nodes when replicated in ρ'.)
+        // *
+        // ! $Env:RUST_BACKTRACE=1
+        // ?
+        // TODO
+
+        // ANCHOR - Used to indicate a section in your file
+        // TODO - An item that is awaiting completion
+        // FIXME - An item that requires a bugfix
+        // STUB - Used for generated default snippets
+        // NOTE - An important note for a specific code section
+        // REVIEW - An item that requires additional review
+        // SECTION - Used to define a region (See 'Hierarchical anchors')
+        // LINK - Used to link to a file that can be opened within the editor (See 'Link Anchors')
+
+        // Find the cut-nodes in p
+        let final_cut_path = Vec::<u32>::new();
+        let mut edge_path = Vec::<Edge>::new();
+        let mut pairs = Vec::<Edge>::new();
+        let mut boundary_groups = Vec::<Vec<u32>>::new();
+        {
+            let mut remaining_boundary_edges = boundary_edges.clone();
+            while let Some(seed) = remaining_boundary_edges.pop() {
+                let mut path = Vec::<u32>::new();
+                path.push(seed[0]);
+                path.push(seed[1]);
+                let mut current = seed[1];
+                while current != seed[0] {
+                    let mut rmv_idx = usize::MAX;
+                    for (idx, e) in remaining_boundary_edges.iter().enumerate() {
+                        if e[0] == current {
+                            current = e[1];
+                            rmv_idx = idx;
+                            break;
+                        } else if e[1] == current {
+                            current = e[0];
+                            rmv_idx = idx;
+                            break;
+                        }
+                    }
+                    path.push(current);
+                    remaining_boundary_edges.remove(rmv_idx);
+                }
+                boundary_groups.push(path);
             }
 
-            // find the adjacent tris
-            {
-                let edg = edge(triangle[0], triangle[1]);
-                if let Some(value) = edges.get(&edg) {
-                    let idx = if value[0] == triangle[2] { 1 } else { 0 };
-                    let push_trig = tri(triangle[0], triangle[1], value[idx]);
-                    if tris.contains(&push_trig) {
-                        // this distance is the distance between the points not on the edge itself
-                        inst_tris.push((push_trig, dist(triangle[2], value[idx]), edg));
-                    }
-                }
-            };
+            let mut consumable_boundary_groups = boundary_groups.clone();
 
-            {
-                let edg = edge(triangle[0], triangle[2]);
-                if let Some(value) = edges.get(&edg) {
-                    let idx = if value[0] == triangle[1] { 1 } else { 0 };
-                    let push_trig = tri(triangle[0], triangle[2], value[idx]);
-                    if tris.contains(&push_trig) {
-                        inst_tris.push((push_trig, dist(triangle[1], value[idx]), edg));
-                    }
-                }
-            };
-
-            {
-                let edg = edge(triangle[1], triangle[2]);
-                if let Some(value) = edges.get(&edg) {
-                    let idx = if value[0] == triangle[0] { 1 } else { 0 };
-                    let push_trig = tri(triangle[1], triangle[2], value[idx]);
-                    if tris.contains(&push_trig) {
-                        inst_tris.push((push_trig, dist(triangle[0], value[idx]), edg));
-                    }
-                }
-            };
-
-            if inst_tris.len() == 0 {
-                'stack: while let Some(edge) = removable_edges.pop() {
-                    // remove edge and the triangle adjacent to it
-
-                    // check if there is another triangle attached to this edge
-                    // if the edge is not in the simplicial complex, it has already been removed and we can move to the next on the stack
-                    if let Some(value) = edges.get(&edge) {
-                        let idx = if triangle[0] != value[0] && triangle[1] != value[0] && triangle[2] != value[0] {
-                            0
-                        } else if triangle[0] != value[1] && triangle[1] != value[1] && triangle[2] != value[1] {
-                            1
-                        } else {
-                            panic!("this is not possible");
-                        };
-                        let push_trig = tri(edge[0], edge[1], value[idx]);
-                        if tris.contains(&push_trig) {
-                            // if there is: remove edge and set the triangle for the next loop iteration
-                            edges.remove(&edge);
-                            triangle = push_trig;
-                            continue 'part_one;
+            let first_group = consumable_boundary_groups.pop().unwrap();
+            let mut current_group = first_group.clone();
+            let mut l_dst;
+            loop {
+                l_dst = (f32::MAX, u32::MAX, u32::MAX, usize::MAX);
+                for (i, group) in consumable_boundary_groups.iter().enumerate() {
+                    for j in &current_group {
+                        for k in group {
+                            let dst = dist(*j, *k);
+                            if dst < l_dst.0 {
+                                l_dst = (dst, *j, *k, i);
+                            }
                         }
                     }
                 }
 
-                {
-                    println!("There are no adjacent triangles to this triangle AND no removables in the queue... fuck");
-                    println!(
-                        "triggles: {}, edges: {}, removables: {}",
-                        tris.len(),
-                        edges.len(),
-                        removable_edges.len()
-                    );
-                    break 'part_one;
-                }
-            } else {
-                // three possible edges to remove from
-                // sort by distance to the current tri and choose the closest in the simplicial complex
-                inst_tris.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+                pairs.push([l_dst.1, l_dst.2]);
+                current_group = consumable_boundary_groups.remove(l_dst.3);
 
-                // remove the corresponding edge
-                edges.remove(&inst_tris[0].2);
-
-                // and set the triangle for the next loop iteration
-                triangle = inst_tris[0].0;
-
-                if inst_tris.len() == 2 {
-                    removable_edges.push(inst_tris[1].2);
-                } else if inst_tris.len() == 3 {
-                    removable_edges.push(inst_tris[1].2);
-                    removable_edges.push(inst_tris[2].2);
+                if consumable_boundary_groups.is_empty() {
+                    break;
                 }
             }
 
-            // empty the temp to prep for next tri
-            inst_tris.clear();
-        }
+            {
+                for j in &current_group {
+                    for k in &first_group {
+                        let dst = dist(*j, *k);
+                        if dst < l_dst.0 {
+                            l_dst = (dst, *j, *k, i);
+                        }
+                    }
+                }
+
+                pairs.pop();
+                pairs.push([l_dst.1, l_dst.2]);
+            };
+
+            // find the shortest path between the two cut nodes
+            // djikstras
+
+            let mut f = File::create("debug.txt").unwrap();
+            for pair in pairs {
+                f.write_all(format!("starting on pair: {} => {}\n", pair[0], pair[1]).as_bytes())
+                    .unwrap();
+                let mut pq = Vec::<(Vec<u32>, f32)>::new();
+                let mut traversed = HashSet::<u32>::new();
+                pq.push((vec![pair[0]], f32::MAX));
+                'djikstra: loop {
+                    let current_vertex = pq.pop().unwrap();
+                    f.write_all(b"dst: ").unwrap();
+                    for v in &vertices[current_vertex.0.last().unwrap()] {
+                        if !traversed.contains(v) {
+                            let dst = dist(*v, pair[1]);
+                            let mut path = current_vertex.0.clone();
+                            path.push(*v);
+                            traversed.insert(*v);
+                            pq.push((path, dst));
+                            if *v == pair[1] {
+                                break 'djikstra;
+                            }
+                        }
+                    }
+
+                    // add the shortest distances to edge_path
+                    pq.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+
+                    f.write_all(format!("shortest: {} \n", pq.last().unwrap().1).as_bytes())
+                        .unwrap();
+                    f.flush().unwrap();
+                }
+                println!("done a node");
+                let final_path = pq.pop().unwrap();
+                for i in 1..final_path.0.len() {
+                    edge_path.push([final_path.0[i - 1], final_path.0[i]]);
+                }
+            }
+            f.flush().unwrap();
+        };
+
+        // unit circle thing
+        {
+            // edge_path
+            // pairs
+            // boundary_groups
+            //    => final_cut_path
+
+            // start at a random point (from pairs?)
+            // proceed down edge_path until you hit the other pair
+            // proceed down the respective element of "boundary_groups"
+        };
 
         // DEBUG
-        {
+        if !boundary_edges.is_empty() {
             let mut f = File::create("debug.obj").unwrap();
             f.write_all(b"mtllib bunny.mtl\no bun_zipper\n").unwrap();
             for v_idx in (0..mesh.positions.len()).step_by(3) {
@@ -245,18 +539,46 @@ pub fn write(obj_file: &String) {
                 .unwrap();
             }
             f.write_all(b"usemtl None\ns off\n").unwrap();
-            for t in tris {
-                f.write_all(format!("f {} {} {}\n", t[0] + 1, t[1] + 1, t[2] + 1).as_bytes())
+            // for t in tris {
+            //     f.write_all(format!("f {} {} {}\n", t[0] + 1, t[1] + 1, t[2] + 1).as_bytes())
+            //         .unwrap();
+            // }
+            // for verts in cut_vertices {
+            //     for v in verts.1 {
+            //         f.write_all(format!("l {} {}\n", verts.0 + 1, v + 1).as_bytes())
+            //             .unwrap();
+            //     }
+            // }
+            // for e in edges {
+            //     f.write_all(format!("l {} {}\n", e.0[0] + 1, e.0[1] + 1).as_bytes())
+            //         .unwrap();
+            // }
+            for e in edge_path {
+                f.write_all(format!("l {} {}\n", e[0] + 1, e[1] + 1).as_bytes())
                     .unwrap();
             }
             f.flush().unwrap();
         };
 
-        // second half of the algorithm, simplifying p
-        // loop {
-        //     //
-        //     break;
-        // }
+        // if you have triangles with all vertices on one edge, that is not ok so you split it like this:
+        //    /\
+        //   /__\
+        //
+        //    /|\
+        //   /_|_\
+        //
+        // and split adjacent triangles in half so the vertex is handled
+        //
+        // split any edges that span over a corner of the geometry image and split their mirror/mate edge as well
+        //
+        // "Finally, we find that placing a valence-1 cut-node at a corner of D results in poor geometric behavior, so if this occurs we rotate the boundary parametrization."
+        // not sure what that means
+
+        // edges is what is the cut p
+        {
+            // add edges to a vec with their length
+            // map the edges to a ?square? boundary
+        };
     }
 }
 
@@ -302,7 +624,7 @@ fn edge(a: u32, b: u32) -> Edge {
 //    Add back two adjacent edges to p.
 // }
 
-/*
+/* c++
 
 void removeSeedTriangle()
 {
@@ -731,125 +1053,10 @@ void recreateMesh()
 
 */
 
-/*
-#[derive(Clone)]
-        struct Node {
-            tris: Vec<Triangle>,
-        }
-        let mut nodes = vec![Node { tris: Vec::new() }; mesh.indices.len() / 3];
-        let mut tris = Vec::<Triangle>::with_capacity(mesh.num_face_indices.len());
-        let mut current_index = 0;
-        for f in 0..mesh.num_face_indices.len() {
-            let tri = [
-                mesh.indices[current_index],
-                mesh.indices[current_index + 1],
-                mesh.indices[current_index + 2],
-                (current_index / 3) as _,
-            ];
-
-            nodes[mesh.indices[current_index] as usize].tris.push(tri);
-            nodes[mesh.indices[current_index + 1] as usize].tris.push(tri);
-            nodes[mesh.indices[current_index + 2] as usize].tris.push(tri);
-
-            tris.push(tri);
-
-            current_index += mesh.num_face_indices[f] as usize;
-        }
-
-        // indices x 2 is likely too big but is decent as a worst case scenario and should prevent reallocation in the middle of the loop (not a huge deal but might as well)
-        let mut idxs = Vec::<u32>::with_capacity(mesh.indices.len() * 2);
-        let mut consumed = HashSet::new();
-
-        fn findTri(tri: &[u32; 4], node: &Node, consumed: &HashSet<usize>) -> (u32, u32) {
-            for t in &node.tris {
-                let index = t[3] as usize;
-                if consumed.contains(&index) {
-                    continue;
-                }
-
-                if tri[1] == t[0] {
-                    if t[1] == tri[0] {
-                        return (t[2], t[3]);
-                    } else {
-                        return (t[1], t[3]);
-                    }
-                }
-                if tri[1] == t[1] {
-                    if t[0] == tri[0] {
-                        return (t[2], t[3]);
-                    } else {
-                        return (t[0], t[3]);
-                    }
-                }
-                if tri[1] == t[2] {
-                    if t[1] == tri[0] {
-                        return (t[0], t[3]);
-                    } else {
-                        return (t[1], t[3]);
-                    }
-                }
-                if tri[2] == t[0] {
-                    if t[1] == tri[0] {
-                        return (t[2], t[3]);
-                    } else {
-                        return (t[1], t[3]);
-                    }
-                }
-                if tri[2] == t[1] {
-                    if t[0] == tri[0] {
-                        return (t[2], t[3]);
-                    } else {
-                        return (t[0], t[3]);
-                    }
-                }
-                if tri[2] == t[2] {
-                    if t[1] == tri[0] {
-                        return (t[0], t[3]);
-                    } else {
-                        return (t[1], t[3]);
-                    }
-                }
-            }
-
-            (u32::MAX, u32::MAX)
-        }
-
-        let mut current = 0;
-        {
-            let tri = &tris[current];
-            idxs.extend_from_slice(tri);
-            consumed.insert(current);
-
-            let node = &nodes[tri[0] as usize];
-
-            // try to find a triangle sharing an edge with this triangle
-            let (v, c) = findTri(tri, node, &consumed);
-
-            current = c as _;
-            idxs.push(v);
-            consumed.insert(current);
-        }
-
-        loop {
-            let tri = &tris[current];
-
-            // not all
-            let node = &nodes[tri[0] as usize];
-
-            // try to find a triangle sharing an edge with this triangle
-            let (v, c) = findTri(tri, node, &consumed);
-
-            if v == u32::MAX {
-                println! {"AHH {} / {}", idxs.len(), mesh.indices.len()};
-                break;
-            }
-
-            current = c as _;
-            idxs.push(v);
-            consumed.insert(current);
-        }
-    }
-
-    println!("complete.");
-
-    */
+/* tri-force
+   /\
+ \/__\/
+ /\  /\
+/__\/__\
+    |
+*/
