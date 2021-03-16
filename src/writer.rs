@@ -152,225 +152,6 @@ pub fn write(obj_file: &String) {
             f32::sqrt((p1[0] - p2[0]).powf(2.0) + (p1[1] - p2[1]).powf(2.0) + (p1[2] - p2[2]).powf(2.0))
         };
 
-        // println!("part 1.0, cut edges and triangles: begins");
-        // {
-        //     let tri_idx = rand::thread_rng().gen_range(0..mesh.num_face_indices.len());
-        //     let mut triangle = tri(
-        //         mesh.indices[tri_idx * 3 + 0],
-        //         mesh.indices[tri_idx * 3 + 1],
-        //         mesh.indices[tri_idx * 3 + 2],
-        //     );
-        //
-        //     if !tris.contains(&triangle) {
-        //         println!("random seed triangle not in the mesh");
-        //     }
-        //
-        //     let mut inst_tris = Vec::<(Triangle, f32, Edge)>::with_capacity(3);
-        //
-        //     println!("{} total edges before removal", edges.len());
-        //
-        //     let mut removable_edges = Vec::<Edge>::new();
-        //
-        //     'part_one: loop {
-        //         if !tris.remove(&triangle) {
-        //             println!("this is not possible, loop triangle not in the mesh");
-        //         }
-        //
-        //         // find the adjacent tris
-        //         {
-        //             let edg = edge(triangle[0], triangle[1]);
-        //             if let Some(value) = edges.get(&edg) {
-        //                 let idx = if value[0] == triangle[2] { 1 } else { 0 };
-        //                 let push_trig = tri(triangle[0], triangle[1], value[idx]);
-        //                 if tris.contains(&push_trig) {
-        //                     // this distance is the distance between the points not on the edge itself
-        //                     inst_tris.push((push_trig, dist(triangle[2], value[idx]), edg));
-        //                 }
-        //             }
-        //         };
-        //
-        //         {
-        //             let edg = edge(triangle[0], triangle[2]);
-        //             if let Some(value) = edges.get(&edg) {
-        //                 let idx = if value[0] == triangle[1] { 1 } else { 0 };
-        //                 let push_trig = tri(triangle[0], triangle[2], value[idx]);
-        //                 if tris.contains(&push_trig) {
-        //                     inst_tris.push((push_trig, dist(triangle[1], value[idx]), edg));
-        //                 }
-        //             }
-        //         };
-        //
-        //         {
-        //             let edg = edge(triangle[1], triangle[2]);
-        //             if let Some(value) = edges.get(&edg) {
-        //                 let idx = if value[0] == triangle[0] { 1 } else { 0 };
-        //                 let push_trig = tri(triangle[1], triangle[2], value[idx]);
-        //                 if tris.contains(&push_trig) {
-        //                     inst_tris.push((push_trig, dist(triangle[0], value[idx]), edg));
-        //                 }
-        //             }
-        //         };
-        //
-        //         if inst_tris.len() == 0 {
-        //             'stack: while let Some(edge) = removable_edges.pop() {
-        //                 // remove edge and the triangle adjacent to it
-        //
-        //                 // check if there is another triangle attached to this edge
-        //                 // if the edge is not in the simplicial complex, it has already been removed and we can move to the next on the stack
-        //                 if let Some(value) = edges.get(&edge) {
-        //                     let idx = if triangle[0] != value[0] && triangle[1] != value[0] && triangle[2] != value[0] {
-        //                         0
-        //                     } else if triangle[0] != value[1] && triangle[1] != value[1] && triangle[2] != value[1] {
-        //                         1
-        //                     } else {
-        //                         panic!("this is not possible");
-        //                     };
-        //                     let push_trig = tri(edge[0], edge[1], value[idx]);
-        //                     if tris.contains(&push_trig) {
-        //                         // if there is: remove edge and set the triangle for the next loop iteration
-        //                         edges.remove(&edge);
-        //                         triangle = push_trig;
-        //                         continue 'part_one;
-        //                     }
-        //                 }
-        //             }
-        //
-        //             {
-        //                 println!("part 1.0, cut edges and triangles: complete");
-        //                 break 'part_one;
-        //             }
-        //         } else {
-        //             // three possible edges to remove from
-        //             // sort by distance to the current tri and choose the closest in the simplicial complex
-        //             inst_tris.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-        //
-        //             // remove the corresponding edge
-        //             edges.remove(&inst_tris[0].2);
-        //
-        //             // and set the triangle for the next loop iteration
-        //             triangle = inst_tris[0].0;
-        //
-        //             if inst_tris.len() == 2 {
-        //                 removable_edges.push(inst_tris[1].2);
-        //             } else if inst_tris.len() == 3 {
-        //                 removable_edges.push(inst_tris[1].2);
-        //                 removable_edges.push(inst_tris[2].2);
-        //             }
-        //         }
-        //
-        //         // empty the temp to prep for next tri
-        //         inst_tris.clear();
-        //     }
-        // }
-
-        // Intermediate step to clean up remaining triangles
-        // println!("part 1.5, cut triangles: begins");
-        // {
-        //     let mut tri_vec: Vec<Triangle> = tris.iter().map(|t| t.clone()).collect();
-        //     let mut inst_tris = Vec::<(Triangle, f32, Edge)>::with_capacity(3);
-        //     let mut temp = Vec::<Triangle>::with_capacity(tri_vec.len());
-        //     'part_one_point_five: loop {
-        //         tri_vec.append(&mut temp);
-        //         temp.clear();
-        //         while let Some(triangle) = tri_vec.pop() {
-        //             {
-        //                 let edg = edge(triangle[0], triangle[1]);
-        //                 if let Some(value) = edges.get(&edg) {
-        //                     let idx = if value[0] == triangle[2] { 1 } else { 0 };
-        //                     let push_trig = tri(triangle[0], triangle[1], value[idx]);
-        //                     if value[idx] != u32::MAX && !tris.contains(&push_trig) {
-        //                         // this distance is the distance between the points not on the edge itself
-        //                         inst_tris.push((push_trig, dist(triangle[2], value[idx]), edg));
-        //                     }
-        //                 }
-        //             };
-        //
-        //             {
-        //                 let edg = edge(triangle[0], triangle[2]);
-        //                 if let Some(value) = edges.get(&edg) {
-        //                     let idx = if value[0] == triangle[1] { 1 } else { 0 };
-        //                     let push_trig = tri(triangle[0], triangle[2], value[idx]);
-        //                     if value[idx] != u32::MAX && !tris.contains(&push_trig) {
-        //                         inst_tris.push((push_trig, dist(triangle[1], value[idx]), edg));
-        //                     }
-        //                 }
-        //             };
-        //
-        //             {
-        //                 let edg = edge(triangle[1], triangle[2]);
-        //                 if let Some(value) = edges.get(&edg) {
-        //                     let idx = if value[0] == triangle[0] { 1 } else { 0 };
-        //                     let push_trig = tri(triangle[1], triangle[2], value[idx]);
-        //                     if value[idx] != u32::MAX && !tris.contains(&push_trig) {
-        //                         inst_tris.push((push_trig, dist(triangle[0], value[idx]), edg));
-        //                     }
-        //                 }
-        //             };
-        //
-        //             if inst_tris.len() != 0 {
-        //                 // three possible edges to remove from
-        //                 // sort by distance to the current tri and choose the closest in the simplicial complex
-        //                 inst_tris.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-        //
-        //                 // remove the corresponding edge
-        //                 edges.remove(&inst_tris[0].2);
-        //
-        //             // tris.remove(triangle);
-        //             } else {
-        //                 temp.push(triangle);
-        //             }
-        //
-        //             // empty the temp to prep for next tri
-        //             inst_tris.clear();
-        //
-        //             tris.remove(&triangle);
-        //         }
-        //
-        //         if temp.is_empty() {
-        //             println!("part 1.5, cut triangles: complete");
-        //             break 'part_one_point_five;
-        //         }
-        //     }
-        // }
-
-        // let mut cut_vertices: HashMap<u32, Vec<u32>> = HashMap::new();
-        // for e in &edges {
-        //     cut_vertices.entry(e.0[0]).or_insert(Vec::new()).push(e.0[1]);
-        //     cut_vertices.entry(e.0[1]).or_insert(Vec::new()).push(e.0[0]);
-        // }
-
-        // second half of the algorithm, simplifying p
-        // println!("part 2.0, cut vertices: begins");
-        // 'part_two: loop {
-        //     let mut removed = false;
-        //     for e in &edges {
-        //         if cut_vertices.contains_key(&e.0[0]) && cut_vertices.contains_key(&e.0[1]) {
-        //             if cut_vertices.get(&e.0[0]).unwrap().len() == 1 {
-        //                 let value = cut_vertices.remove(&e.0[0]).unwrap();
-        //                 cut_vertices.entry(value[0]).and_modify(|v| {
-        //                     v.remove(v.iter().position(|&n| n == e.0[0]).unwrap());
-        //                 });
-        //
-        //                 removed = true;
-        //             }
-        //
-        //             if cut_vertices.get(&e.0[1]).unwrap().len() == 1 {
-        //                 let value = cut_vertices.remove(&e.0[1]).unwrap();
-        //                 cut_vertices.entry(value[0]).and_modify(|v| {
-        //                     v.remove(v.iter().position(|&n| n == e.0[1]).unwrap());
-        //                 });
-        //
-        //                 removed = true;
-        //             }
-        //         }
-        //     }
-        //
-        //     if !removed {
-        //         println!("part 2.0, cut vertices: complete");
-        //         break 'part_two;
-        //     }
-        // }
-
         // if only a single vertex remains in p then add back two adjacent edges to p.
         //     this happens if the mesh is entirely closed with no pre-existing boundary edges:
         //     "For the case of a closed mesh of genus 0, the resulting ρ will consist of a single
@@ -382,7 +163,10 @@ pub fn write(obj_file: &String) {
         //      shortest path that connects its two adjacent cut-nodes and
         //      stays within a neighborhood of the original cut-path."
         //
-        // A vertex v with valence k in ρ is replicated as k vertices in ρ'. Vertices in ρ that have valence k != 2 in the cut are called cut-nodes. (We still refer to these as cut-nodes when replicated in ρ'.)
+        // A vertex v with valence k in ρ is replicated as k vertices in ρ'.
+        // Vertices in ρ that have valence k != 2 in the cut are called cut-nodes.
+        // (We still refer to these as cut-nodes when replicated in ρ'.)
+        //
         // *
         // ! $Env:RUST_BACKTRACE=1
         // ?
@@ -394,19 +178,23 @@ pub fn write(obj_file: &String) {
         // STUB - Used for generated default snippets
         // NOTE - An important note for a specific code section
         // REVIEW - An item that requires additional review
+        // LINK - Used to link to a file that can be opened within the editor (See 'Link Anchors'
         // SECTION - Used to define a region (See 'Hierarchical anchors')
-        // LINK - Used to link to a file that can be opened within the editor (See 'Link Anchors')
+        // ANCHOR this is in the section, section
+        // !SECTION
 
         // Find the cut-nodes in p
-        let final_cut_path = Vec::<u32>::new();
-        let mut edge_path = Vec::<Edge>::new();
+        let mut edge_path = Vec::<Vec<u32>>::new();
         let mut pairs = Vec::<Edge>::new();
         let mut boundary_groups = Vec::<Vec<u32>>::new();
+        println!("part 1");
+        // TODO one of the edges is duplicated in both the boundary group and the edge_path, ensure in djikstras that that does not happen
+        // TODO find a better closest point between groups 
         {
             let mut remaining_boundary_edges = boundary_edges.clone();
             while let Some(seed) = remaining_boundary_edges.pop() {
                 let mut path = Vec::<u32>::new();
-                path.push(seed[0]);
+                // path.push(seed[0]);
                 path.push(seed[1]);
                 let mut current = seed[1];
                 while current != seed[0] {
@@ -428,15 +216,15 @@ pub fn write(obj_file: &String) {
                 boundary_groups.push(path);
             }
 
-            let mut consumable_boundary_groups = boundary_groups.clone();
+            let mut cnsmbl_boundary_groups = boundary_groups.clone();
 
-            let first_group = consumable_boundary_groups.pop().unwrap();
-            let mut current_group = first_group.clone();
+            let first_group = cnsmbl_boundary_groups.pop().unwrap();
+            let mut crnt_group = first_group.clone();
             let mut l_dst;
             loop {
                 l_dst = (f32::MAX, u32::MAX, u32::MAX, usize::MAX);
-                for (i, group) in consumable_boundary_groups.iter().enumerate() {
-                    for j in &current_group {
+                for (i, group) in cnsmbl_boundary_groups.iter().enumerate() {
+                    for j in &crnt_group {
                         for k in group {
                             let dst = dist(*j, *k);
                             if dst < l_dst.0 {
@@ -447,15 +235,15 @@ pub fn write(obj_file: &String) {
                 }
 
                 pairs.push([l_dst.1, l_dst.2]);
-                current_group = consumable_boundary_groups.remove(l_dst.3);
+                crnt_group = cnsmbl_boundary_groups.remove(l_dst.3);
 
-                if consumable_boundary_groups.is_empty() {
+                if cnsmbl_boundary_groups.is_empty() {
                     break;
                 }
             }
 
             {
-                for j in &current_group {
+                for j in &crnt_group {
                     for k in &first_group {
                         let dst = dist(*j, *k);
                         if dst < l_dst.0 {
@@ -471,20 +259,16 @@ pub fn write(obj_file: &String) {
             // find the shortest path between the two cut nodes
             // djikstras
 
-            let mut f = File::create("debug.txt").unwrap();
-            for pair in pairs {
-                f.write_all(format!("starting on pair: {} => {}\n", pair[0], pair[1]).as_bytes())
-                    .unwrap();
+            for pair in &pairs {
                 let mut pq = Vec::<(Vec<u32>, f32)>::new();
                 let mut traversed = HashSet::<u32>::new();
                 pq.push((vec![pair[0]], f32::MAX));
                 'djikstra: loop {
-                    let current_vertex = pq.pop().unwrap();
-                    f.write_all(b"dst: ").unwrap();
-                    for v in &vertices[current_vertex.0.last().unwrap()] {
+                    let crnt_vertex = pq.pop().unwrap();
+                    for v in &vertices[crnt_vertex.0.last().unwrap()] {
                         if !traversed.contains(v) {
                             let dst = dist(*v, pair[1]);
-                            let mut path = current_vertex.0.clone();
+                            let mut path = crnt_vertex.0.clone();
                             path.push(*v);
                             traversed.insert(*v);
                             pq.push((path, dst));
@@ -496,32 +280,161 @@ pub fn write(obj_file: &String) {
 
                     // add the shortest distances to edge_path
                     pq.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-
-                    f.write_all(format!("shortest: {} \n", pq.last().unwrap().1).as_bytes())
-                        .unwrap();
-                    f.flush().unwrap();
                 }
-                println!("done a node");
-                let final_path = pq.pop().unwrap();
-                for i in 1..final_path.0.len() {
-                    edge_path.push([final_path.0[i - 1], final_path.0[i]]);
-                }
+                let final_path = pq.pop().unwrap().0;
+                edge_path.push(final_path);
             }
-            f.flush().unwrap();
         };
 
+        let mut final_cut_path = Vec::<u32>::new();
+        println!("part 2");
         // unit circle thing
         {
+            // println!("part 2.0.1");
+            // let mut f = File::create("debug.txt").unwrap();
+            // f.write_all(b"pairs: ").unwrap();
+            // for pt in &pairs {
+            //     f.write_all(format!("\n    pair: [{}, {}]", pt[0], pt[1]).as_bytes())
+            //         .unwrap();
+            // }
+            // f.write_all(b"\nedge_path: ").unwrap();
+            // for edge in &edge_path {
+            //     f.write_all(b"\n    edge: ").unwrap();
+            //     for pt in edge {
+            //         f.write_all(format!("{}, ", pt).as_bytes()).unwrap();
+            //     }
+            // }
+            // f.write_all(b"\nboundary_groups: ").unwrap();
+            // for group in &boundary_groups {
+            //     f.write_all(b"\n\n    group: ").unwrap();
+            //     for pt in group {
+            //         f.write_all(format!("{}, ", pt).as_bytes()).unwrap();
+            //     }
+            // }
+            // f.flush().unwrap();
+
             // edge_path
             // pairs
             // boundary_groups
             //    => final_cut_path
+            //
+            let mut cnsmbl_pairs = pairs.clone();
+            for pair in &pairs {
+                cnsmbl_pairs.push([pair[1], pair[0]]);
+            }
+            let mut cnsmbl_edge_path = edge_path.clone();
+            for path in &edge_path {
+                let mut clone = path.clone();
+                clone.reverse();
+                cnsmbl_edge_path.push(clone);
+            }
+            // let mut cnsmbl_boundary_groups = boundary_groups.clone();
+            // let mut final_cut_path = Vec::<u32>::new();
+            // println!("part 2.1");
+            {
+                // * start at a random point (from pairs?)
+                let mut pair = cnsmbl_pairs.pop().unwrap();
+                let mut crnt_vert = pair[0];
+                let end_point = pair[0];
+                // println!("part 2.1.1, crnt_vert: {}", crnt_vert);
+                'final_path_loop: loop {
+                    // * proceed down edge_path until you hit the other pair
+                    // println!("part 2.1.1: edge_path");
+                    let mut hit = false;
+                    crnt_vert = pair[0];
 
-            // start at a random point (from pairs?)
-            // proceed down edge_path until you hit the other pair
-            // proceed down the respective element of "boundary_groups"
+                    for idx in 0..cnsmbl_edge_path.len() {
+                        if cnsmbl_edge_path[idx][0] == crnt_vert {
+                            let mut path = cnsmbl_edge_path.remove(idx);
+                            // println!(
+                            //     "part 2.1.1: found path: {} => {}",
+                            //     path.first().unwrap(),
+                            //     path.last().unwrap()
+                            // );
+                            crnt_vert = path.pop().unwrap();
+                            final_cut_path.append(&mut path);
+                            hit = true;
+                            break;
+                        }
+                    }
+                    if !hit {
+                        println!("AHHH, no edge path found");
+                        println!("cnsmbl_edge_path: {:?}", cnsmbl_edge_path);
+                        break;
+                    }
+
+                    // * proceed down the respective element of "boundary_groups"
+                    // println!("part 2.1.1: boundary_groups");
+                    let mut group_idx = usize::MAX;
+                    'group_loop: for group in &boundary_groups {
+                        for (idx, vert) in group.iter().enumerate() {
+                            if *vert == crnt_vert {
+                                group_idx = idx;
+                                break;
+                            }
+                        }
+
+                        if group_idx != usize::MAX {
+                            // println!(
+                            //     "part 2.1.1: found group: {} => {}",
+                            //     group.first().unwrap(),
+                            //     group.last().unwrap()
+                            // );
+                            loop {
+                                final_cut_path.push(group[group_idx]);
+                                group_idx += 1;
+                                if group_idx == group.len() {
+                                    group_idx = 0;
+                                }
+
+                                if cnsmbl_pairs.is_empty() {
+                                    if group[group_idx] == end_point {
+                                        // println!("crnt_vert: {}, end_point: {}", group[group_idx], end_point);
+                                        break 'final_path_loop;
+                                    }
+                                } else {
+                                    for (idx, p) in cnsmbl_pairs.iter().enumerate() {
+                                        if p[0] == group[group_idx] {
+                                            // println!(
+                                            //     "part 2.1.1: group[group_idx]: {}, found new pair: [{}, {}]",
+                                            //     group[group_idx], p[0], p[1]
+                                            // );
+                                            pair = cnsmbl_pairs.remove(idx);
+                                            break 'group_loop;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            };
+
+            // println!("part 2.2");
+            // let mut f = File::create("debug2.txt").unwrap();
+            // f.write_all(b"path: ").unwrap();
+            // for pt in &final_cut_path {
+            //     f.write_all(format!("{}, ", pt).as_bytes()).unwrap();
+            // }
+            // f.flush().unwrap();
+
+            // if you have triangles with all vertices on one edge, that is not ok so you split it like this:
+            //    /\
+            //   /__\
+            //
+            //    /|\
+            //   /_|_\
+            //
+            // and split adjacent triangles in half so the vertex is handled
+            //
+            // split any edges that span over a corner of the geometry image and split their mirror/mate edge as well
+            //
+            //     "Finally, we find that placing a valence-1 cut-node at a corner of D results in poor geometric
+            //      behavior, so if this occurs we rotate the boundary parametrization."
+            // not sure what that means
         };
 
+        println!("part 3");
         // DEBUG
         if !boundary_edges.is_empty() {
             let mut f = File::create("debug.obj").unwrap();
@@ -553,31 +466,20 @@ pub fn write(obj_file: &String) {
             //     f.write_all(format!("l {} {}\n", e.0[0] + 1, e.0[1] + 1).as_bytes())
             //         .unwrap();
             // }
-            for e in edge_path {
-                f.write_all(format!("l {} {}\n", e[0] + 1, e[1] + 1).as_bytes())
-                    .unwrap();
+            // for e in edge_path {
+            //     f.write_all(format!("l {} {}\n", e[0] + 1, e[1] + 1).as_bytes())
+            //         .unwrap();
+            // }//
+            {
+                // for idx in 1..final_cut_path.len() {}
+                let path = final_cut_path
+                    .iter()
+                    .map(|pt| format!("{}", pt + 1))
+                    .collect::<Vec<String>>()
+                    .join(" ");
+                f.write_all(format!("l {}\n", path).as_bytes()).unwrap();
             }
             f.flush().unwrap();
-        };
-
-        // if you have triangles with all vertices on one edge, that is not ok so you split it like this:
-        //    /\
-        //   /__\
-        //
-        //    /|\
-        //   /_|_\
-        //
-        // and split adjacent triangles in half so the vertex is handled
-        //
-        // split any edges that span over a corner of the geometry image and split their mirror/mate edge as well
-        //
-        // "Finally, we find that placing a valence-1 cut-node at a corner of D results in poor geometric behavior, so if this occurs we rotate the boundary parametrization."
-        // not sure what that means
-
-        // edges is what is the cut p
-        {
-            // add edges to a vec with their length
-            // map the edges to a ?square? boundary
         };
     }
 }
@@ -612,343 +514,8 @@ fn edge(a: u32, b: u32) -> Edge {
     }
 }
 
-// fn cut() {
-// function Cut(mesh M)
-//    Remove seed triangle.
-//    while there remains an edge e adjacent to only one triangle t
-//    Remove e and t.
-//    while there remains a vertex v adjacent to only one edge e
-//    Remove v and e.
-//    Cut p := remaining edges and vertices.
-//    if only a single vertex remains in p then
-//    Add back two adjacent edges to p.
-// }
-
-/* c++
-
-void removeSeedTriangle()
-{
-    int randTri = ((float)rand())/RAND_MAX * Triangles.size();
-    int i = 0, j;
-    vector<Tri *>::iterator triItr;
-
-    for(triItr = Triangles.begin(); triItr != Triangles.end(); triItr++)
-    {
-        if(i == randTri)
-        {
-            for(j = 0; j < cutPathEdges.size(); j++)
-            {
-                if((cutPathEdges[j]->v1 == Triangles[i]->v1
-                    && cutPathEdges[j]->v2 == Triangles[i]->v2)
-                    || (cutPathEdges[j]->v1 == Triangles[i]->v2
-                    && cutPathEdges[j]->v2 == Triangles[i]->v1))
-                {
-                    cutPathEdges[j]->color.x = 0;
-                    cutPathEdges[j]->color.y = 1;
-                }
-
-                if((cutPathEdges[j]->v1 == Triangles[i]->v2
-                    && cutPathEdges[j]->v2 == Triangles[i]->v3)
-                    || (cutPathEdges[j]->v1 == Triangles[i]->v3
-                    && cutPathEdges[j]->v2 == Triangles[i]->v2))
-                {
-                    cutPathEdges[j]->color.x = 0;
-                    cutPathEdges[j]->color.y = 1;
-                }
-
-                if((cutPathEdges[j]->v1 == Triangles[i]->v1
-                    && cutPathEdges[j]->v2 == Triangles[i]->v3)
-                    || (cutPathEdges[j]->v1 == Triangles[i]->v3
-                    && cutPathEdges[j]->v2 == Triangles[i]->v1))
-                {
-                    cutPathEdges[j]->color.x = 0;
-                    cutPathEdges[j]->color.y = 1;
-                }
-            }
-            Triangles.erase(triItr);
-            break;
-        }
-        i++;
-    }
-}
-
-void createInitialCutPart1()
-{
-    bool inMoreThanOneTriangle = false;
-    bool foundEdge = false;
-    int triInd, edgeInd;
-
-    // IF there remains an edge e adjacent to only one triangle t
-    //     remove e and t
-    for(int i = 0; i < cutPathEdges.size(); i++)
-    {
-        foundEdge = false;
-        for(int j = 0; j < Triangles.size(); j++)
-        {
-            if((cutPathEdges[i]->v1 == Triangles[j]->v1
-                && cutPathEdges[i]->v2 == Triangles[j]->v2)
-                || (cutPathEdges[i]->v1 == Triangles[j]->v2
-                && cutPathEdges[i]->v2 == Triangles[j]->v1))
-            {
-                if(!foundEdge)
-                {
-                    triInd = j;
-                    foundEdge = true;
-                }
-                else
-                {
-                    inMoreThanOneTriangle = true;
-                    break;
-                }
-            }
-            else if((cutPathEdges[i]->v1 == Triangles[j]->v2
-                && cutPathEdges[i]->v2 == Triangles[j]->v3)
-                || (cutPathEdges[i]->v1 == Triangles[j]->v3
-                && cutPathEdges[i]->v2 == Triangles[j]->v2))
-            {
-                if(!foundEdge)
-                {
-                    triInd = j;
-                    foundEdge = true;
-                }
-                else
-                {
-                    inMoreThanOneTriangle = true;
-                    break;
-                }
-            }
-            else if((cutPathEdges[i]->v1 == Triangles[j]->v1
-                && cutPathEdges[i]->v2 == Triangles[j]->v3)
-                || (cutPathEdges[i]->v1 == Triangles[j]->v3
-                && cutPathEdges[i]->v2 == Triangles[j]->v1))
-            {
-                if(!foundEdge)
-                {
-                    triInd = j;
-                    foundEdge = true;
-                }
-                else
-                {
-                    inMoreThanOneTriangle = true;
-                    break;
-                }
-            }
-            else
-            {
-                // Do nothing
-            }
-        }
-
-        // IF one edge found
-        if(foundEdge && !inMoreThanOneTriangle)
-        {
-            edgeInd = i;
-            break;
-        }
-        else
-        {
-            inMoreThanOneTriangle = false;
-        }
-    }
-
-    // IF found one edge, remove that edge and triangle
-    if(foundEdge && !inMoreThanOneTriangle)
-    {
-        vector<Tri *>::iterator triItr;
-        vector<Edge *>::iterator edgeItr;
-        int edgeNum = 0, triNum = 0;
-
-        for(triItr = Triangles.begin(); triItr != Triangles.end(); triItr++)
-        {
-            // IF this is the triangle to remove
-            if(triInd == triNum)
-            {
-                // Search for each pair of vertices in cutPathEdges
-                for(int i = 0; i < cutPathEdges.size(); i++)
-                {
-                    if((cutPathEdges[i]->v1 == Triangles[triInd]->v1
-                        && cutPathEdges[i]->v2 == Triangles[triInd]->v2)
-                        || (cutPathEdges[i]->v1 == Triangles[triInd]->v2
-                        && cutPathEdges[i]->v2 == Triangles[triInd]->v1))
-                    {
-                        cutPathEdges[i]->color.x = 0;
-                        cutPathEdges[i]->color.y = 1;
-                    }
-                    else if((cutPathEdges[i]->v1 == Triangles[triInd]->v2
-                        && cutPathEdges[i]->v2 == Triangles[triInd]->v3)
-                        || (cutPathEdges[i]->v1 == Triangles[triInd]->v3
-                        && cutPathEdges[i]->v2 == Triangles[triInd]->v2))
-                    {
-                        cutPathEdges[i]->color.x = 0;
-                        cutPathEdges[i]->color.y = 1;
-                    }
-                    else if((cutPathEdges[i]->v1 == Triangles[triInd]->v1
-                        && cutPathEdges[i]->v2 == Triangles[triInd]->v3)
-                        || (cutPathEdges[i]->v1 == Triangles[triInd]->v3
-                        && cutPathEdges[i]->v2 == Triangles[triInd]->v1))
-                    {
-                        cutPathEdges[i]->color.x = 0;
-                        cutPathEdges[i]->color.y = 1;
-                    }
-                    else
-                    {
-                        // Do nothing
-                    }
-                }
-                Triangles.erase(triItr);
-                break;
-            }
-            triNum++;
-        }
-
-        for(edgeItr = cutPathEdges.begin(); edgeItr != cutPathEdges.end(); edgeItr++)
-        {
-            // IF this is the edge to remove
-            if(edgeInd == edgeNum)
-            {
-                cutPathEdges.erase(edgeItr);
-                break;
-            }
-            edgeNum++;
-        }
-    }
-    else
-    {
-        removedEandT = true;
-    }
-}
-
-void createInitialCutPart2()
-{
-    // IF there remains a vertex v adjacent to only one edge e
-    //     remove v and e
-    bool inMoreThanOneEdge = false;
-    bool foundVertex = false;
-    int vertInd, edgeInd;
-    int count = 0;
-
-    // IF there remains a vertex v adjacent to only one edge e
-    //     remove v and e
-    for(int i = 0; i < Vertices.size(); i++)
-    {
-        foundVertex = false;
-        for(int j = 0; j < cutPathEdges.size(); j++)
-        {
-            if((i == cutPathEdges[j]->v1) || (i == cutPathEdges[j]->v2))
-            {
-                if(!foundVertex)
-                {
-                    edgeInd = j;
-                    foundVertex = true;
-                }
-                else
-                {
-                    inMoreThanOneEdge = true;
-                    break;
-                }
-            }
-            else
-            {
-                // Do nothing
-            }
-        }
-
-        // IF one vertex found
-        if(foundVertex && !inMoreThanOneEdge)
-        {
-            vertInd = i;
-            break;
-        }
-        else
-        {
-            inMoreThanOneEdge = false;
-        }
-    }
-
-    // IF found one edge, remove that edge and triangle
-    if(foundVertex && !inMoreThanOneEdge)
-    {
-        vector<Vector3 *>::iterator vertItr;
-        vector<Edge *>::iterator edgeItr;
-        int edgeNum = 0, vertNum = 0;
-
-        if(cutPathEdges.size() <= 2)
-        {
-            removedVandE = true;
-
-            for(int i = 0; i < cutPathEdges.size(); i++)
-            {
-                cutPathEdges[i]->color.x = 0;
-                cutPathEdges[i]->color.y = 1;
-                cutPathEdges[i]->color.z = 0;
-            }
-
-            return;
-        }
-
-        for(edgeItr = cutPathEdges.begin(); edgeItr != cutPathEdges.end(); edgeItr++)
-        {
-            // IF this is the edge to remove
-            if(edgeInd == edgeNum)
-            {
-                cutPathEdges.erase(edgeItr);
-                break;
-            }
-            edgeNum++;
-        }
-    }
-    else
-    {
-        removedVandE = true;
-    }
-
-
-    for(int i = 0; i < cutPathEdges.size(); i++)
-    {
-        bool v1flag = false;
-        bool v2flag = false;
-
-        for(int j = 0; j < cutPathEdges.size(); j++)
-        {
-            if(i != j)
-            {
-                if(cutPathEdges[i]->v1 == cutPathEdges[j]->v1)
-                {
-                    v1flag = true;
-                }
-                else if(cutPathEdges[i]->v1 == cutPathEdges[j]->v2)
-                {
-                    v1flag = true;
-                }
-                else if(cutPathEdges[i]->v2 == cutPathEdges[j]->v1)
-                {
-                    v2flag = true;
-                }
-                else if(cutPathEdges[i]->v2 == cutPathEdges[j]->v2)
-                {
-                    v2flag = true;
-                }
-                else
-                {
-                    // Do nothing
-                }
-            }
-        }
-
-        if(v1flag && v2flag)
-        {
-
-        }
-        else
-        {
-            cutPathEdges[i]->color.x = 1;
-            cutPathEdges[i]->color.y = .6;
-            cutPathEdges[i]->color.z = .6;
-        }
-    }
-}
-
-void recreateMesh()
+// c++
+/* void recreateMesh()
 {
     //GIMxInd and GIMyInd are indices into the image 2d array of 256x256
     //myimage is the GIM
@@ -1050,13 +617,4 @@ void recreateMesh()
     }
     //calcAllNewVertexNormals();
 }
-
-*/
-
-/* tri-force
-   /\
- \/__\/
- /\  /\
-/__\/__\
-    |
 */
