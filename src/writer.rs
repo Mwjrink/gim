@@ -188,8 +188,9 @@ pub fn write(obj_file: &String) {
         let mut pairs = Vec::<Edge>::new();
         let mut boundary_groups = Vec::<Vec<u32>>::new();
         println!("part 1");
-        // TODO one of the edges is duplicated in both the boundary group and the edge_path, ensure in djikstras that that does not happen
-        // TODO find a better closest point between groups 
+        // TODO one of the edges is duplicated in both the boundary group and the edge_path, ensure in dijkstra that that does not happen
+        // TODO find a better closest point between groups
+        // * Maybe use dijkstra's with multiple start points and the lowest distance to the end group as the params
         {
             let mut remaining_boundary_edges = boundary_edges.clone();
             while let Some(seed) = remaining_boundary_edges.pop() {
@@ -218,6 +219,7 @@ pub fn write(obj_file: &String) {
 
             let mut cnsmbl_boundary_groups = boundary_groups.clone();
 
+            // TODO this is not actually the lowest, if you have groups on either side of a big brick wall, they are not the closest
             let first_group = cnsmbl_boundary_groups.pop().unwrap();
             let mut crnt_group = first_group.clone();
             let mut l_dst;
@@ -257,13 +259,13 @@ pub fn write(obj_file: &String) {
             };
 
             // find the shortest path between the two cut nodes
-            // djikstras
+            // dijkstra
 
             for pair in &pairs {
                 let mut pq = Vec::<(Vec<u32>, f32)>::new();
                 let mut traversed = HashSet::<u32>::new();
                 pq.push((vec![pair[0]], f32::MAX));
-                'djikstra: loop {
+                'dijkstra: loop {
                     let crnt_vertex = pq.pop().unwrap();
                     for v in &vertices[crnt_vertex.0.last().unwrap()] {
                         if !traversed.contains(v) {
@@ -273,7 +275,7 @@ pub fn write(obj_file: &String) {
                             traversed.insert(*v);
                             pq.push((path, dst));
                             if *v == pair[1] {
-                                break 'djikstra;
+                                break 'dijkstra;
                             }
                         }
                     }
@@ -291,27 +293,27 @@ pub fn write(obj_file: &String) {
         // unit circle thing
         {
             // println!("part 2.0.1");
-            // let mut f = File::create("debug.txt").unwrap();
-            // f.write_all(b"pairs: ").unwrap();
-            // for pt in &pairs {
-            //     f.write_all(format!("\n    pair: [{}, {}]", pt[0], pt[1]).as_bytes())
-            //         .unwrap();
-            // }
-            // f.write_all(b"\nedge_path: ").unwrap();
-            // for edge in &edge_path {
-            //     f.write_all(b"\n    edge: ").unwrap();
-            //     for pt in edge {
-            //         f.write_all(format!("{}, ", pt).as_bytes()).unwrap();
-            //     }
-            // }
-            // f.write_all(b"\nboundary_groups: ").unwrap();
-            // for group in &boundary_groups {
-            //     f.write_all(b"\n\n    group: ").unwrap();
-            //     for pt in group {
-            //         f.write_all(format!("{}, ", pt).as_bytes()).unwrap();
-            //     }
-            // }
-            // f.flush().unwrap();
+            let mut f = File::create("debug.txt").unwrap();
+            f.write_all(b"pairs: ").unwrap();
+            for pt in &pairs {
+                f.write_all(format!("\n    pair: [{}, {}]", pt[0], pt[1]).as_bytes())
+                    .unwrap();
+            }
+            f.write_all(b"\nedge_path: ").unwrap();
+            for edge in &edge_path {
+                f.write_all(b"\n    edge: ").unwrap();
+                for pt in edge {
+                    f.write_all(format!("{}, ", pt).as_bytes()).unwrap();
+                }
+            }
+            f.write_all(b"\nboundary_groups: ").unwrap();
+            for group in &boundary_groups {
+                f.write_all(b"\n\n    group: ").unwrap();
+                for pt in group {
+                    f.write_all(format!("{}, ", pt).as_bytes()).unwrap();
+                }
+            }
+            f.flush().unwrap();
 
             // edge_path
             // pairs
@@ -334,7 +336,7 @@ pub fn write(obj_file: &String) {
             {
                 // * start at a random point (from pairs?)
                 let mut pair = cnsmbl_pairs.pop().unwrap();
-                let mut crnt_vert = pair[0];
+                let mut crnt_vert;
                 let end_point = pair[0];
                 // println!("part 2.1.1, crnt_vert: {}", crnt_vert);
                 'final_path_loop: loop {
@@ -417,6 +419,10 @@ pub fn write(obj_file: &String) {
             //     f.write_all(format!("{}, ", pt).as_bytes()).unwrap();
             // }
             // f.flush().unwrap();
+            let mut edge_verts = HashSet::new();
+            for vert in &final_cut_path {
+                edge_verts.insert(vert);
+            }
 
             // if you have triangles with all vertices on one edge, that is not ok so you split it like this:
             //    /\
@@ -426,6 +432,206 @@ pub fn write(obj_file: &String) {
             //   /_|_\
             //
             // and split adjacent triangles in half so the vertex is handled
+            let mut mapped_tris: Vec<Triangle> = tris.iter().cloned().collect();
+            let mut mapped_verts: Vec<f32> = mesh.positions.clone();
+            for idx in (0..mapped_tris.len()).rev() {
+                if edge_verts.contains(&mapped_tris[idx][0])
+                    && edge_verts.contains(&mapped_tris[idx][1])
+                    && edge_verts.contains(&mapped_tris[idx][2])
+                {
+                    // println!(
+                    //     "Parametrically degenerate triangle: [{}, {}, {}]",
+                    //     mapped_tris[idx][0], mapped_tris[idx][1], mapped_tris[idx][2]
+                    // );
+
+                    // test where each of the verts are, boundary, edge or both
+                    // choose two verts not in the same one
+
+                    let vert_in = |vert| {
+                        let mut in_edge = false;
+                        let mut boundary = false;
+                        for edge in &edge_path {
+                            for v in edge {
+                                if *v == vert {
+                                    in_edge = true;
+                                    break;
+                                }
+                            }
+                        }
+
+                        'groups: for group in &boundary_groups {
+                            for v in group {
+                                if *v == vert {
+                                    boundary = true;
+                                    break 'groups;
+                                }
+                            }
+                        }
+
+                        (boundary, in_edge)
+                    };
+
+                    let mid_point = |a, b| {
+                        let p1 = &mesh.positions[(a * 3) as usize..(a * 3 + 3) as usize];
+                        let p2 = &mesh.positions[(b * 3) as usize..(b * 3 + 3) as usize];
+
+                        vec![(p1[0] + p2[0]) * 0.5, (p1[1] + p2[1]) * 0.5, (p1[2] + p2[2]) * 0.5]
+                    };
+
+                    let (v0_boundary, v0_edge) = vert_in(mapped_tris[idx][0]);
+                    let (v1_boundary, v1_edge) = vert_in(mapped_tris[idx][1]);
+                    let (v2_boundary, v2_edge) = vert_in(mapped_tris[idx][2]);
+
+                    // split the edge across from the vertex that is a part of both edge and boundary group
+                    let triangle = mapped_tris.remove(idx);
+                    if v0_boundary ^ v1_boundary || v0_edge ^ v1_edge {
+                        let mut midpoint = mid_point(triangle[0], triangle[1]);
+                        mapped_tris.push(tri(triangle[2], triangle[0], mapped_verts.len() as u32));
+                        mapped_tris.push(tri(triangle[2], triangle[1], mapped_verts.len() as u32));
+                        mapped_verts.append(&mut midpoint);
+                    } else if v0_boundary ^ v2_boundary || v0_edge ^ v2_edge {
+                        let mut midpoint = mid_point(triangle[0], triangle[2]);
+                        mapped_tris.push(tri(triangle[1], triangle[0], mapped_verts.len() as u32));
+                        mapped_tris.push(tri(triangle[1], triangle[2], mapped_verts.len() as u32));
+                        mapped_verts.append(&mut midpoint);
+                    } else if v1_boundary ^ v2_boundary || v1_edge ^ v2_edge {
+                        let mut midpoint = mid_point(triangle[1], triangle[2]);
+                        mapped_tris.push(tri(triangle[0], triangle[1], mapped_verts.len() as u32));
+                        mapped_tris.push(tri(triangle[0], triangle[2], mapped_verts.len() as u32));
+                        mapped_verts.append(&mut midpoint);
+                    } else {
+                        // println!("triangle is broken ): ");
+                        // order them like they are ordered in the edge or boundary they come from
+                        // split accross 0, 2
+                        let mut ordering = Vec::<u32>::with_capacity(3);
+
+                        // println!("v0_boundary: {}", v0_boundary);
+                        // println!("v1_boundary: {}", v1_boundary);
+                        // println!("v2_boundary: {}", v2_boundary);
+
+                        // println!("v0_edge: {}", v0_edge);
+                        // println!("v1_edge: {}", v1_edge);
+                        // println!("v2_edge: {}", v2_edge);
+
+                        if v0_edge && v1_edge && v2_edge {
+                            for edge in &edge_path {
+                                for v in edge {
+                                    if *v == triangle[0] || *v == triangle[1] || *v == triangle[2] {
+                                        ordering.push(*v);
+                                        if ordering.len() == 3 {
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        } else if v0_boundary && v1_boundary && v2_boundary {
+                            'groups: for group in &boundary_groups {
+                                loop {
+                                    for v in group {
+                                        if *v == triangle[0] || *v == triangle[1] || *v == triangle[2] {
+                                            ordering.push(*v);
+                                            if ordering.len() == 3 {
+                                                break 'groups;
+                                            }
+                                        } else if !ordering.is_empty() {
+                                            ordering.clear();
+                                        }
+                                    }
+
+                                    if ordering.is_empty() {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        let mut midpoint = mid_point(ordering[0], ordering[2]);
+                        mapped_tris.push(tri(ordering[1], ordering[0], mapped_verts.len() as u32));
+                        mapped_tris.push(tri(ordering[1], ordering[2], mapped_verts.len() as u32));
+                        mapped_verts.append(&mut midpoint);
+                    }
+                }
+            }
+
+            // calculate the dimensions of the image
+            let mut gi_width: usize = 3;
+            loop {
+                let tri_count = 2 * (gi_width - 1).pow(2);
+                if tri_count > mesh.num_face_indices.len() {
+                    break;
+                } else {
+                    gi_width = (gi_width - 1) * 2 + 1;
+                }
+            }
+
+            println!("gi_width: {}", gi_width);
+
+            // calculate the total length of the path
+            let mut length = 0.0f32;
+            for idx in 1..final_cut_path.len() {
+                length += f32::sqrt(dist(final_cut_path[idx - 1], final_cut_path[idx]));
+            }
+            length += f32::sqrt(dist(final_cut_path[0], *final_cut_path.last().unwrap()));
+
+            println!("Total length: {}", length);
+
+            let perimeter = gi_width * 4;
+            let mut ___gi_vec = vec![u32::MAX; gi_width * gi_width];
+            let gi = ___gi_vec.as_mut_slice();
+
+            // start at the top left, insert indices
+            let mut idx: usize = 0;
+            let mut x: usize = 0;
+            loop {
+                gi[x] = 0;
+
+                let increment = f32::round(
+                    dist(final_cut_path[x], final_cut_path[x + 1]).sqrt() / perimeter as f32 * gi_width as f32,
+                ) as usize;
+
+                if x + increment > gi_width {
+                    // split edge
+                    let overflow = x + increment - gi_width;
+                    let remainder = increment - overflow;
+
+                    // split the corresponding triangle using this edge along the edge with teh proportions of remainder : overflow
+
+                    // ? break;
+                }
+                idx += 1;
+            }
+
+            for x in 0..gi_width {
+                gi[x] = final_cut_path[idx];
+            }
+
+            for y in 0..gi_width {
+                //
+            }
+
+            for x in (0..gi_width).rev() {
+                //
+            }
+
+            for y in (0..gi_width).rev() {
+                //
+            }
+
+            // start with one of the vertices of the edge path
+
+            // ! DEBUG TEST
+            // for idx in (0..mapped_tris.len()).rev() {
+            //     if edge_verts.contains(&mapped_tris[idx][0])
+            //         && edge_verts.contains(&mapped_tris[idx][1])
+            //         && edge_verts.contains(&mapped_tris[idx][2])
+            //     {
+            //         println!(
+            //             "Parametrically degenerate triangle: [{}, {}, {}]",
+            //             mapped_tris[idx][0], mapped_tris[idx][1], mapped_tris[idx][2]
+            //         );
+            //     }
+            // }
+
             //
             // split any edges that span over a corner of the geometry image and split their mirror/mate edge as well
             //
