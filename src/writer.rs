@@ -1,14 +1,11 @@
 // create clusters of 128 triangles
 // choose a seed triangle, choose the next vertex corresponding to an edge that is closest to the seed triangle
 
-use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::{fs::File, io::prelude::*, panic};
-use meshopt;
 
-type Triangle = [u32; 3];
-type Edge = [u32; 2];
-type Point = [f32; 3];
+use crate::mesh::*;
+
 const TRIS_IN_CLUSTER: usize = 128;
 
 #[derive(Clone)]
@@ -16,6 +13,12 @@ struct Cluster {
     tris: Vec<Triangle>,
     cut: HashSet<Edge>,
     anchor: Point,
+}
+
+struct SharedEdges {
+    // sum_of_two_highest_shared_edges -> vec[0] + vec[1],
+    id: usize,
+    connections: Vec<(usize, i32)>, // shared_edge_cluster_id, number_of_shared_edges // keep this sorted?
 }
 
 pub fn write(obj_file: &String) {
@@ -83,9 +86,7 @@ pub fn write(obj_file: &String) {
         };
 
         let sqr_dist_w_2custom = |a: Point, b: Point| {
-            f32::sqrt(
-                (a[0] - b[0]).powf(2.0) + (a[1] - b[1]).powf(2.0) + (a[2] - b[2]).powf(2.0),
-            )
+            f32::sqrt((a[0] - b[0]).powf(2.0) + (a[1] - b[1]).powf(2.0) + (a[2] - b[2]).powf(2.0))
         };
 
         let mid_point_2 = |a: u32, b: u32| {
@@ -122,7 +123,8 @@ pub fn write(obj_file: &String) {
         // create data structure that can be referenced to find which indices are included in which triangles
 
         // SECTION - Fill vertices, tris, edges and boundary edges
-        let (edges, tris, vertices) = generate_data_structures(&mesh.num_face_indices.len(), &mesh.indices);
+        let (edges, tris, vertices) =
+            generate_data_structures(&mesh.num_face_indices.len(), &mesh.indices);
 
         // !SECTION - Fill vertices, tris, edges and boundary edges
 
@@ -145,8 +147,7 @@ pub fn write(obj_file: &String) {
 
         // Find the cut-nodes in p
         let mut overall_cluster_cut = HashSet::<Edge>::new();
-        let mut clusters =
-            Vec::<Cluster>::with_capacity(mesh.indices.len() / TRIS_IN_CLUSTER + 1);
+        let mut clusters = Vec::<Cluster>::with_capacity(mesh.indices.len() / TRIS_IN_CLUSTER + 1);
 
         // let mut unwinds_queued = 0; // Stack frames to unwind?
 
@@ -247,16 +248,16 @@ pub fn write(obj_file: &String) {
 
                 let anchor = calculate_anchor(&cur_cluster_tris.iter().collect(), &mid_point_3);
 
-//                 if cur_cluster_tris.len() < TRIS_IN_CLUSTER {
-//                     // degenerate_clusters.push(clusters.len() - 1);
-//                     unwinds_queued += 1;
+                //                 if cur_cluster_tris.len() < TRIS_IN_CLUSTER {
+                //                     // degenerate_clusters.push(clusters.len() - 1);
+                //                     unwinds_queued += 1;
 
-//                     if tris.len() == 0 {
-//                         // break ; 
-// might not need to do anything cause the while loop stops on this condition anyways so continuing will end the loop 
-//                     }
-//                     continue;
-//                 }
+                //                     if tris.len() == 0 {
+                //                         // break ;
+                // might not need to do anything cause the while loop stops on this condition anyways so continuing will end the loop
+                //                     }
+                //                     continue;
+                //                 }
 
                 // we have completed a cluster
                 clusters.push(Cluster {
@@ -323,243 +324,381 @@ pub fn write(obj_file: &String) {
         {
             // find 4 clusters that share the most edges with eachother (closest anchors?)
 
-            struct SharedEdges {
-                // sum_of_two_highest_shared_edges -> vec[0] + vec[1], 
-                id: usize,
-                connections: Vec<(usize, i32)> // shared_edge_cluster_id, number_of_shared_edges // keep this sorted?
-            }
-
             let mut graph: Vec<(usize, usize, usize)> = Vec::new();
             let mut shared_edges: Vec<SharedEdges> = Vec::new();
-            let mut cluster_dict: HashMap<usize, Cluster> = HashMap::new();
-            
+            // let mut cluster_dict: HashMap<usize, Cluster> = HashMap::new();
+
             // list of tuples[3], index, index and number of shared edges
-            //// sort the list based on number of shared edges 
+            //// sort the list based on number of shared edges
             for i in 0..clusters.len() {
                 let start_index = graph.len();
                 for j in 0..clusters.len() {
+                    if i == j {
+                        continue;
+                    }
+
                     let count = clusters[i].cut.intersection(&clusters[j].cut).count();
                     if count > 0 {
                         graph.push((i, j, count));
                     }
                 }
-                shared_edges.push( SharedEdges {
+                shared_edges.push(SharedEdges {
                     id: i,
-                    connections: graph[start_index..].iter().map(|element| { (element.1, element.2 as i32) }).collect()
+                    connections: graph[start_index..]
+                        .iter()
+                        .map(|element| (element.1, element.2 as i32))
+                        .collect(),
                 });
-                cluster_dict.insert(i, clusters[i].clone());
+                // cluster_dict.insert(i, clusters[i].clone());
             }
 
             // Vec[cluster_id] -> { sum_of_two_highest_shared_edges -> vec[0] + vec[1], Vec<(shared_edge_cluster_id, number_of_shared_edges)> // keep this sorted? }>
 
-            // grab the highest value of sum_of_two_highest_shared_edges and grab the highest index that is in both of the other connecting vecs
-            shared_edges.sort_by(|element1, element2| { 
-                let val1 = element1.connections.get(0).unwrap_or(&(0,i32::MIN)).1 + element1.connections.get(1).unwrap_or(&(0,i32::MIN)).1;
-                let val2 = element2.connections.get(0).unwrap_or(&(0,i32::MIN)).1 + element2.connections.get(1).unwrap_or(&(0,i32::MIN)).1;
-                val1.cmp(&val2) });
+            while clusters.len() > 2 {
+                // grab the highest value of sum_of_two_highest_shared_edges and grab the highest index that is in both of the other connecting vecs
+                shared_edges.sort_by(|element1, element2| {
+                    let val1 = element1.connections.get(0).unwrap_or(&(0, i32::MIN)).1
+                        + element1.connections.get(1).unwrap_or(&(0, i32::MIN)).1;
+                    let val2 = element2.connections.get(0).unwrap_or(&(0, i32::MIN)).1
+                        + element2.connections.get(1).unwrap_or(&(0, i32::MIN)).1;
+                    val1.cmp(&val2)
+                });
 
-            let starting_point = shared_edges.last().unwrap();
-            let share1 = starting_point.connections[0];
-            // dont unwrap, if none, remove from list
-            let edges1 = shared_edges.iter().find(|value| { value.id == share1.0 }).unwrap();
-            let share2 = starting_point.connections[1];
-            let edges2 = shared_edges.iter().find(|value| { value.id == share2.0 }).unwrap();
+                // TODO my 4 clusters are the same 2 clusters, fix that
+                // TODO determine if any clusters are abandoned by combining these, include that one, ie ring abandons tip of ear on
 
-            let mut highest_combo = (0 as usize, 0);
-            for connection1 in &edges1.connections {
-                for connection2 in &edges2.connections {
-                    if connection1.0 == connection2.0 {
-                        let shared = connection1.1 + connection2.1;
-                        if shared > highest_combo.1 {
-                            highest_combo = (connection1.0, shared);
+                let share0 = (shared_edges.last().unwrap().id, 0);
+
+                // let starting_point = shared_edges.last().unwrap();
+                let share1 = shared_edges.last().unwrap().connections[0];
+                // dont unwrap, if none, remove from list
+                let cluster1_index = shared_edges
+                    .iter()
+                    .position(|value| value.id == share1.0)
+                    .unwrap();
+
+                let share2 = shared_edges.last().unwrap().connections[1];
+                let cluster2_index = shared_edges
+                    .iter()
+                    .position(|value| value.id == share2.0)
+                    .unwrap();
+
+                let mut highest_combo = (0 as usize, 0);
+                for connection1 in &shared_edges[cluster1_index].connections {
+                    if connection1.0 != share0.0
+                        && connection1.0 != shared_edges[cluster1_index].id
+                        && connection1.0 != shared_edges[cluster2_index].id
+                    {
+                        for connection2 in &shared_edges[cluster2_index].connections {
+                            if connection2.0 != share0.0
+                                && connection2.0 != shared_edges[cluster1_index].id
+                                && connection2.0 != shared_edges[cluster2_index].id
+                            {
+                                let shared = connection1.1 + connection2.1;
+                                if shared > highest_combo.1 {
+                                    highest_combo = (connection1.0, shared);
+                                }
+                            }
                         }
                     }
                 }
-            }
 
-            let share3 = highest_combo;
+                let share3 = highest_combo;
+                let cluster3_index = shared_edges
+                    .iter()
+                    .position(|value| value.id == share3.0)
+                    .unwrap();
 
-            // combine the clusters into one mesh
-            let mut triangles = Vec::<Triangle>::with_capacity(clusters[starting_point.id].tris.len() + clusters[share1.0].tris.len() + clusters[share2.0].tris.len() + clusters[share3.0].tris.len());
-            triangles.extend_from_slice(&clusters[starting_point.id].tris);
-            triangles.extend_from_slice(&clusters[share1.0].tris);
-            triangles.extend_from_slice(&clusters[share2.0].tris);
-            triangles.extend_from_slice(&clusters[share3.0].tris);
+                // combine the clusters into one mesh
+                let mut triangles = Vec::<Triangle>::with_capacity(
+                    clusters[share0.0].tris.len()
+                        + clusters[share1.0].tris.len()
+                        + clusters[share2.0].tris.len()
+                        + clusters[share3.0].tris.len(),
+                );
+                triangles.extend_from_slice(&clusters[shared_edges.last().unwrap().id].tris);
+                triangles.extend_from_slice(&clusters[share1.0].tris);
+                triangles.extend_from_slice(&clusters[share2.0].tris);
+                triangles.extend_from_slice(&clusters[share3.0].tris);
 
-            let mut indices = Vec::with_capacity(triangles.len() * 3);
-            for tri in triangles {
-                indices.extend_from_slice(&tri);
-            }
-
-            // let border = clusters[starting_point.id].cut
-            //     .symmetric_difference(&clusters[share1.0].cut).map(|value| { value.clone() }).collect::<HashSet<[u32; 2]>>()
-            //     .symmetric_difference(&clusters[share2.0].cut).map(|value| { value.clone() }).collect::<HashSet<[u32; 2]>>()
-            //     .symmetric_difference(&clusters[share3.0].cut).map(|value| { value.clone() }).collect::<HashSet<[u32; 2]>>();
-
-            let vertices_in_bytes = unsafe { std::slice::from_raw_parts(mesh.positions.as_ptr() as *const u8, mesh.positions.len() * 4) };
-
-            let adapter = meshopt::utilities::VertexDataAdapter::new(vertices_in_bytes, 64, 0).unwrap();
-            let new_indices = meshopt::simplify::simplify(&indices, &adapter, TRIS_IN_CLUSTER * 2, 0.01);
-
-            // hashmap of clusters, id to cluster
-            cluster_dict.remove(&starting_point.id);
-            cluster_dict.remove(&share1.0);
-            cluster_dict.remove(&share2.0);
-            cluster_dict.remove(&share3.0);
-
-            // calculate new cut
-            let (_, tris, _) = generate_data_structures(&(new_indices.len()/3), &new_indices);
-            
-            let combined_anchor = calculate_anchor(&tris.iter().collect(), &mid_point_3);
-            // split cluster into 2, choose any triangle on the border as a seed, same algorithm as above
-            
-            let mut furthest = ([0.0f32, 0.0, 0.0], 0.0 as f32);
-            let mut furthest_tri: Triangle = [0,0,0];
-            for tri in &tris {
-                let mid_point = mid_point_3(tri[0], tri[1], tri[2]);
-                let dist = sqr_dist_w_2custom(mid_point_3(tri[0], tri[1], tri[2]), combined_anchor);
-                if dist > furthest.1 {
-                    furthest = (mid_point, dist);
-                    furthest_tri = *tri;
+                let mut indices = Vec::with_capacity(triangles.len() * 3);
+                for tri in triangles {
+                    indices.extend_from_slice(&tri);
                 }
-            }
 
-            let mut furthest_from_furthest = ([0.0f32, 0.0, 0.0], 0.0 as f32);
-            let mut furthest_from_furthest_tri: Triangle = [0,0,0];
-            for tri in &tris {
-                let mid_point = mid_point_3(tri[0], tri[1], tri[2]);
-                let dist = sqr_dist_w_2custom(furthest.0, mid_point);
-                if dist > furthest.1 {
-                    furthest_from_furthest = (mid_point, dist);
-                    furthest_from_furthest_tri = *tri;
-                }
-            }
+                // let border = clusters[starting_point.id].cut
+                //     .symmetric_difference(&clusters[share1.0].cut).map(|value| { value.clone() }).collect::<HashSet<[u32; 2]>>()
+                //     .symmetric_difference(&clusters[share2.0].cut).map(|value| { value.clone() }).collect::<HashSet<[u32; 2]>>()
+                //     .symmetric_difference(&clusters[share3.0].cut).map(|value| { value.clone() }).collect::<HashSet<[u32; 2]>>();
 
-            let mut cluster1_tris = Vec::with_capacity(TRIS_IN_CLUSTER);
-            let mut cluster1_edges = HashMap::<Edge, [u32; 2]>::with_capacity(TRIS_IN_CLUSTER * 3);
+                let vertices_in_bytes = unsafe {
+                    std::slice::from_raw_parts(
+                        mesh.positions.as_ptr() as *const u8,
+                        mesh.positions.len() * 4,
+                    )
+                };
 
-            let mut cluster2_tris = Vec::with_capacity(TRIS_IN_CLUSTER);
-            let mut cluster2_edges = HashMap::<Edge, [u32; 2]>::with_capacity(TRIS_IN_CLUSTER * 3);
 
-            for tri in &tris {
-                if *tri != furthest_tri && *tri != furthest_from_furthest_tri {
+                // mesh simplification
+
+
+                println!("writing original with {} indices", indices.len());
+                write_mesh_to_file("original", &mesh.positions, &indices);
+                println!(
+                    "writing cluster1 with {} tris",
+                    clusters[shared_edges.last().unwrap().id].tris.len()
+                );
+                write_mesh_to_file(
+                    "cluster1",
+                    &mesh.positions,
+                    &clusters[shared_edges.last().unwrap().id]
+                        .tris
+                        .iter()
+                        .flatten()
+                        .cloned()
+                        .collect(),
+                );
+                println!(
+                    "writing cluster2 with {} tris",
+                    clusters[share1.0].tris.len()
+                );
+                write_mesh_to_file(
+                    "cluster2",
+                    &mesh.positions,
+                    &clusters[share1.0].tris.iter().flatten().cloned().collect(),
+                );
+                println!(
+                    "writing cluster3 with {} tris",
+                    clusters[share2.0].tris.len()
+                );
+                write_mesh_to_file(
+                    "cluster3",
+                    &mesh.positions,
+                    &clusters[share2.0].tris.iter().flatten().cloned().collect(),
+                );
+                println!(
+                    "writing cluster4 with {} tris",
+                    clusters[share3.0].tris.len()
+                );
+                write_mesh_to_file(
+                    "cluster4",
+                    &mesh.positions,
+                    &clusters[share3.0].tris.iter().flatten().cloned().collect(),
+                );                
+                println!(
+                    "writing new_indices with {} tris",
+                    new_indices.len() / 3
+                );
+                write_mesh_to_file("new_indices", &mesh.positions, &new_indices);
+
+                panic!();
+
+                // hashmap of clusters, id to cluster
+                // cluster_dict.remove(&shared_edges.last().unwrap().id);
+                // cluster_dict.remove(&share1.0);
+                // cluster_dict.remove(&share2.0);
+                // cluster_dict.remove(&share3.0);
+
+                // calculate new cut
+                let (_, tris, _) = generate_data_structures(&(new_indices.len() / 3), &new_indices);
+
+                let combined_anchor = calculate_anchor(&tris.iter().collect(), &mid_point_3);
+                // split cluster into 2, choose any triangle on the border as a seed, same algorithm as above
+
+                let mut furthest = ([0.0f32, 0.0, 0.0], 0.0 as f32);
+                let mut furthest_tri: Triangle = [0, 0, 0];
+                for tri in &tris {
                     let mid_point = mid_point_3(tri[0], tri[1], tri[2]);
-                    let dist1 = sqr_dist_w_2custom(furthest.0, mid_point);
-                    let dist2 = sqr_dist_w_2custom(furthest_from_furthest.0, mid_point);
-
-                    if dist1 > dist2 && cluster2_tris.len() < TRIS_IN_CLUSTER {
-                        cluster2_tris.push(*tri);
-
-                        {
-                            let key: Edge = new_edge(tri[0], tri[1]);
-                            let value = cluster2_edges.insert(key, [tri[2], u32::MAX]);
-                            if let Some(v) = value {
-                                if v[1] != u32::MAX {
-                                    println!("this edge has appeared more than twice: {:?}", key);
-                                }
-                                cluster2_edges.insert(key, [tri[2], v[0]]);
-                            }
-                        }
-                        {
-                            let key: Edge = new_edge(tri[0], tri[2]);
-                            let value = cluster2_edges.insert(key, [tri[1], u32::MAX]);
-                            if let Some(v) = value {
-                                if v[1] != u32::MAX {
-                                    println!("this edge has appeared more than twice: {:?}", key);
-                                }
-                                cluster2_edges.insert(key, [tri[1], v[0]]);
-                            }
-                        }
-                        {
-                            let key: Edge = new_edge(tri[1], tri[2]);
-                            let value = cluster2_edges.insert(key, [tri[0], u32::MAX]);
-                            if let Some(v) = value {
-                                if v[1] != u32::MAX {
-                                    println!("this edge has appeared more than twice: {:?}", key);
-                                }
-                                cluster2_edges.insert(key, [tri[0], v[0]]);
-                            }
-                        }
-                        // create edges here?
-                    } else {
-                        cluster1_tris.push(*tri);
-
-                        {
-                            let key: Edge = new_edge(tri[0], tri[1]);
-                            let value = cluster1_edges.insert(key, [tri[2], u32::MAX]);
-                            if let Some(v) = value {
-                                if v[1] != u32::MAX {
-                                    println!("this edge has appeared more than twice: {:?}", key);
-                                }
-                                cluster1_edges.insert(key, [tri[2], v[0]]);
-                            }
-                        }
-                        {
-                            let key: Edge = new_edge(tri[0], tri[2]);
-                            let value = cluster1_edges.insert(key, [tri[1], u32::MAX]);
-                            if let Some(v) = value {
-                                if v[1] != u32::MAX {
-                                    println!("this edge has appeared more than twice: {:?}", key);
-                                }
-                                cluster1_edges.insert(key, [tri[1], v[0]]);
-                            }
-                        }
-                        {
-                            let key: Edge = new_edge(tri[1], tri[2]);
-                            let value = cluster1_edges.insert(key, [tri[0], u32::MAX]);
-                            if let Some(v) = value {
-                                if v[1] != u32::MAX {
-                                    println!("this edge has appeared more than twice: {:?}", key);
-                                }
-                                cluster1_edges.insert(key, [tri[0], v[0]]);
-                            }
-                        }
-                        // create edges here?
+                    let dist =
+                        sqr_dist_w_2custom(mid_point_3(tri[0], tri[1], tri[2]), combined_anchor);
+                    if dist > furthest.1 {
+                        furthest = (mid_point, dist);
+                        furthest_tri = *tri;
                     }
                 }
+
+                let mut furthest_from_furthest = ([0.0f32, 0.0, 0.0], 0.0 as f32);
+                let mut furthest_from_furthest_tri: Triangle = [0, 0, 0];
+                for tri in &tris {
+                    let mid_point = mid_point_3(tri[0], tri[1], tri[2]);
+                    let dist = sqr_dist_w_2custom(furthest.0, mid_point);
+                    if dist > furthest.1 {
+                        furthest_from_furthest = (mid_point, dist);
+                        furthest_from_furthest_tri = *tri;
+                    }
+                }
+
+                let mut cluster1_tris = Vec::with_capacity(TRIS_IN_CLUSTER);
+                let mut cluster1_edges =
+                    HashMap::<Edge, [u32; 2]>::with_capacity(TRIS_IN_CLUSTER * 3);
+
+                let mut cluster2_tris = Vec::with_capacity(TRIS_IN_CLUSTER);
+                let mut cluster2_edges =
+                    HashMap::<Edge, [u32; 2]>::with_capacity(TRIS_IN_CLUSTER * 3);
+
+                for tri in &tris {
+                    if *tri != furthest_tri && *tri != furthest_from_furthest_tri {
+                        let mid_point = mid_point_3(tri[0], tri[1], tri[2]);
+                        let dist1 = sqr_dist_w_2custom(furthest.0, mid_point);
+                        let dist2 = sqr_dist_w_2custom(furthest_from_furthest.0, mid_point);
+
+                        if dist1 > dist2 && cluster2_tris.len() < TRIS_IN_CLUSTER {
+                            cluster2_tris.push(*tri);
+
+                            {
+                                let key: Edge = new_edge(tri[0], tri[1]);
+                                let value = cluster2_edges.insert(key, [tri[2], u32::MAX]);
+                                if let Some(v) = value {
+                                    if v[1] != u32::MAX {
+                                        println!(
+                                            "this edge has appeared more than twice: {:?}",
+                                            key
+                                        );
+                                    }
+                                    cluster2_edges.insert(key, [tri[2], v[0]]);
+                                }
+                            }
+                            {
+                                let key: Edge = new_edge(tri[0], tri[2]);
+                                let value = cluster2_edges.insert(key, [tri[1], u32::MAX]);
+                                if let Some(v) = value {
+                                    if v[1] != u32::MAX {
+                                        println!(
+                                            "this edge has appeared more than twice: {:?}",
+                                            key
+                                        );
+                                    }
+                                    cluster2_edges.insert(key, [tri[1], v[0]]);
+                                }
+                            }
+                            {
+                                let key: Edge = new_edge(tri[1], tri[2]);
+                                let value = cluster2_edges.insert(key, [tri[0], u32::MAX]);
+                                if let Some(v) = value {
+                                    if v[1] != u32::MAX {
+                                        println!(
+                                            "this edge has appeared more than twice: {:?}",
+                                            key
+                                        );
+                                    }
+                                    cluster2_edges.insert(key, [tri[0], v[0]]);
+                                }
+                            }
+                            // create edges here?
+                        } else {
+                            cluster1_tris.push(*tri);
+
+                            {
+                                let key: Edge = new_edge(tri[0], tri[1]);
+                                let value = cluster1_edges.insert(key, [tri[2], u32::MAX]);
+                                if let Some(v) = value {
+                                    if v[1] != u32::MAX {
+                                        println!(
+                                            "this edge has appeared more than twice: {:?}",
+                                            key
+                                        );
+                                    }
+                                    cluster1_edges.insert(key, [tri[2], v[0]]);
+                                }
+                            }
+                            {
+                                let key: Edge = new_edge(tri[0], tri[2]);
+                                let value = cluster1_edges.insert(key, [tri[1], u32::MAX]);
+                                if let Some(v) = value {
+                                    if v[1] != u32::MAX {
+                                        println!(
+                                            "this edge has appeared more than twice: {:?}",
+                                            key
+                                        );
+                                    }
+                                    cluster1_edges.insert(key, [tri[1], v[0]]);
+                                }
+                            }
+                            {
+                                let key: Edge = new_edge(tri[1], tri[2]);
+                                let value = cluster1_edges.insert(key, [tri[0], u32::MAX]);
+                                if let Some(v) = value {
+                                    if v[1] != u32::MAX {
+                                        println!(
+                                            "this edge has appeared more than twice: {:?}",
+                                            key
+                                        );
+                                    }
+                                    cluster1_edges.insert(key, [tri[0], v[0]]);
+                                }
+                            }
+                            // create edges here?
+                        }
+                    }
+                }
+
+                let combined1_anchor =
+                    calculate_anchor(&cluster1_tris.iter().collect(), &mid_point_3);
+                let combined2_anchor =
+                    calculate_anchor(&cluster2_tris.iter().collect(), &mid_point_3);
+
+                // calculate cut
+                let combined1_cut = {
+                    let mut cut = HashSet::<Edge>::new();
+                    for kv in cluster1_edges {
+                        if kv.1[0] == u32::MAX || kv.1[1] == u32::MAX {
+                            cut.insert(kv.0);
+                        }
+                    }
+
+                    cut
+                };
+                let combined2_cut = {
+                    let mut cut = HashSet::<Edge>::new();
+                    for kv in cluster2_edges {
+                        if kv.1[0] == u32::MAX || kv.1[1] == u32::MAX {
+                            cut.insert(kv.0);
+                        }
+                    }
+
+                    cut
+                };
+
+                let combined1 = Cluster {
+                    tris: cluster1_tris,
+                    cut: combined1_cut,
+                    anchor: combined1_anchor,
+                };
+                let combined2 = Cluster {
+                    tris: cluster2_tris,
+                    cut: combined2_cut,
+                    anchor: combined2_anchor,
+                };
+                // cluster_dict.insert(clusters.len(), combined1.clone());
+                clusters.push(combined1);
+                // cluster_dict.insert(clusters.len(), combined2.clone());
+                clusters.push(combined2);
+
+                // fix the overlapping edges on the other clusters in the lists
+                recalculate_shared_edges(
+                    shared_edges.len() - 1,
+                    shared_edges.last_mut().unwrap(),
+                    &clusters,
+                );
+
+                recalculate_shared_edges(
+                    cluster1_index,
+                    &mut shared_edges[cluster1_index],
+                    &clusters,
+                );
+
+                recalculate_shared_edges(
+                    cluster2_index,
+                    &mut shared_edges[cluster2_index],
+                    &clusters,
+                );
+
+                recalculate_shared_edges(
+                    cluster3_index,
+                    &mut shared_edges[cluster3_index],
+                    &clusters,
+                );
             }
-
-            let combined1_anchor = calculate_anchor(&cluster1_tris.iter().collect(), &mid_point_3);
-            let combined2_anchor = calculate_anchor(&cluster2_tris.iter().collect(), &mid_point_3);
-
-            // calculate cut
-            let combined1_cut = {
-                let mut cut = HashSet::<Edge>::new();
-                for kv in cluster1_edges {
-                    if kv.1[0] == u32::MAX || kv.1[1] == u32::MAX {
-                        cut.insert(kv.0);
-                    }
-                }
-
-                cut
-            };
-            let combined2_cut = {
-                let mut cut = HashSet::<Edge>::new();
-                for kv in cluster2_edges {
-                    if kv.1[0] == u32::MAX || kv.1[1] == u32::MAX {
-                        cut.insert(kv.0);
-                    }
-                }
-
-                cut
-            };
-
-            let combined1 = Cluster {
-                tris: cluster1_tris,
-                cut: combined1_cut,
-                anchor: combined1_anchor,
-            };
-            let combined2 = Cluster {
-                tris: cluster2_tris,
-                cut: combined2_cut,
-                anchor: combined2_anchor,
-            };
-            cluster_dict.insert(clusters.len(), combined1.clone());
-            cluster_dict.insert(clusters.len(), combined2.clone());
-
-            // fix the overlapping edges on the other clusters in the lists
-            // TODO
-
             // simplify the large clusters triangles
             // split the cluster into two clusters of TRIS_IN_CLUSTER size
             // add the clusters back to the list of clusters to be combined
@@ -630,21 +769,21 @@ pub fn write(obj_file: &String) {
             //     }
             // }
 
-//             f.write_all(format!("o prev_cluster_cut_1\n").as_bytes())
-//                 .unwrap();
-//             f.write_all(prev_cluster_cut.as_bytes()).unwrap();
-// 
-//             f.write_all(format!("o last_cluster_cut_2\n").as_bytes())
-//                 .unwrap();
-//             f.write_all(last_cluster_cut.as_bytes()).unwrap();
-// 
-//             f.write_all(format!("o prev_overall_cut_1\n").as_bytes())
-//                 .unwrap();
-//             f.write_all(prev_overall_cut.as_bytes()).unwrap();
-// 
-//             f.write_all(format!("o last_overall_cut_2\n").as_bytes())
-//                 .unwrap();
-//             f.write_all(last_overall_cut.as_bytes()).unwrap();
+            //             f.write_all(format!("o prev_cluster_cut_1\n").as_bytes())
+            //                 .unwrap();
+            //             f.write_all(prev_cluster_cut.as_bytes()).unwrap();
+            //
+            //             f.write_all(format!("o last_cluster_cut_2\n").as_bytes())
+            //                 .unwrap();
+            //             f.write_all(last_cluster_cut.as_bytes()).unwrap();
+            //
+            //             f.write_all(format!("o prev_overall_cut_1\n").as_bytes())
+            //                 .unwrap();
+            //             f.write_all(prev_overall_cut.as_bytes()).unwrap();
+            //
+            //             f.write_all(format!("o last_overall_cut_2\n").as_bytes())
+            //                 .unwrap();
+            //             f.write_all(last_overall_cut.as_bytes()).unwrap();
 
             for (idx, cluster) in clusters.iter().enumerate() {
                 f.write_all(format!("o Cluster{}\n", idx + 1).as_bytes())
@@ -664,119 +803,27 @@ pub fn write(obj_file: &String) {
     }
 }
 
-fn generate_data_structures(
-    tri_count: &usize, 
-    indices: &Vec<u32>
-) -> (HashMap::<Edge, [u32; 2]>, HashSet::<Triangle>, HashMap<u32, Vec<u32>>) {
-        let mut edges = HashMap::<Edge, [u32; 2]>::with_capacity(tri_count * 24);
-        let mut tris = HashSet::<Triangle>::with_capacity(*tri_count);
-        let mut vertices: HashMap<u32, Vec<u32>> = HashMap::new();
-        //
+fn calculate_anchor(
+    cur_cluster_tris: &Vec<&[u32; 3]>,
+    mid_point_3: &dyn Fn(u32, u32, u32) -> [f32; 3],
+) -> [f32; 3] {
+    let mut sum: Point = [0.0, 0.0, 0.0];
 
-        // SECTION - Fill vertices, tris, edges and boundary edges
-        {
-            // * fill vertices, tris and edges
-            let mut idx = 0;
-            for verts in 0..*tri_count {
-                let idx0 = indices[idx + 0];
-                let idx1 = indices[idx + 1];
-                let idx2 = indices[idx + 2];
-
-                {
-                    let key: Edge = new_edge(idx0, idx1);
-                    let value = edges.insert(key, [idx2, u32::MAX]);
-                    if let Some(v) = value {
-                        if v[1] != u32::MAX {
-                            println!("this edge has appeared more than twice: {:?}", key);
-                        }
-                        edges.insert(key, [idx2, v[0]]);
-                    }
-                }
-                {
-                    let key: Edge = new_edge(idx0, idx2);
-                    let value = edges.insert(key, [idx1, u32::MAX]);
-                    if let Some(v) = value {
-                        if v[1] != u32::MAX {
-                            println!("this edge has appeared more than twice: {:?}", key);
-                        }
-                        edges.insert(key, [idx1, v[0]]);
-                    }
-                }
-                {
-                    let key: Edge = new_edge(idx1, idx2);
-                    let value = edges.insert(key, [idx0, u32::MAX]);
-                    if let Some(v) = value {
-                        if v[1] != u32::MAX {
-                            println!("this edge has appeared more than twice: {:?}", key);
-                        }
-                        edges.insert(key, [idx0, v[0]]);
-                    }
-                }
-
-                {
-                    vertices
-                        .entry(idx0)
-                        .or_insert(Vec::with_capacity(8))
-                        .push(idx1);
-                    vertices
-                        .entry(idx0)
-                        .or_insert(Vec::with_capacity(8))
-                        .push(idx2);
-
-                    vertices
-                        .entry(idx1)
-                        .or_insert(Vec::with_capacity(8))
-                        .push(idx0);
-                    vertices
-                        .entry(idx1)
-                        .or_insert(Vec::with_capacity(8))
-                        .push(idx2);
-
-                    vertices
-                        .entry(idx2)
-                        .or_insert(Vec::with_capacity(8))
-                        .push(idx0);
-                    vertices
-                        .entry(idx2)
-                        .or_insert(Vec::with_capacity(8))
-                        .push(idx1);
-
-                    // this removes duplicates that happen due to shared verts in triangles
-                    vertices.entry(idx0).or_default().sort_unstable();
-                    vertices.entry(idx0).or_default().dedup();
-                    vertices.entry(idx1).or_default().sort_unstable();
-                    vertices.entry(idx1).or_default().dedup();
-                    vertices.entry(idx2).or_default().sort_unstable();
-                    vertices.entry(idx2).or_default().dedup();
-                };
-
-                tris.insert(new_tri(idx0, idx1, idx2));
-
-                idx += verts as usize;
-            }
-        };
-
-    (edges, tris, vertices)
-}
-
-fn calculate_anchor(cur_cluster_tris: &Vec<&[u32; 3]>, mid_point_3: &dyn Fn(u32, u32, u32) -> [f32; 3]) -> [f32; 3] {
-        let mut sum: Point = [0.0, 0.0, 0.0];
-
-        for triangle in cur_cluster_tris {
-            // TODO make this a vectorized op using a math library
-            let center = mid_point_3(triangle[0], triangle[1], triangle[2]);
-            // TODO make this a vectorized op using a math library
-            sum[0] += center[0];
-            sum[1] += center[1];
-            sum[2] += center[2];
-        }
-
+    for triangle in cur_cluster_tris {
         // TODO make this a vectorized op using a math library
-        [
-            sum[0] / (cur_cluster_tris.len() as f32),
-            sum[1] / (cur_cluster_tris.len() as f32),
-            sum[2] / (cur_cluster_tris.len() as f32),
-        ]
+        let center = mid_point_3(triangle[0], triangle[1], triangle[2]);
+        // TODO make this a vectorized op using a math library
+        sum[0] += center[0];
+        sum[1] += center[1];
+        sum[2] += center[2];
+    }
+
+    // TODO make this a vectorized op using a math library
+    [
+        sum[0] / (cur_cluster_tris.len() as f32),
+        sum[1] / (cur_cluster_tris.len() as f32),
+        sum[2] / (cur_cluster_tris.len() as f32),
+    ]
 }
 
 fn remove_tri(
@@ -943,7 +990,7 @@ fn add_tri(
             overall_cluster_cut.insert(edge0);
         }
         edges.insert(edge0, new_edge(tri[2], u32::MAX));
-    } 
+    }
     // else {
     //     cur_cut.insert(edge0);
     // }
@@ -957,7 +1004,7 @@ fn add_tri(
             overall_cluster_cut.insert(edge1);
         }
         edges.insert(edge1, new_edge(tri[1], u32::MAX));
-    } 
+    }
     // else {
     //     cur_cut.insert(edge1);
     // }
@@ -971,7 +1018,7 @@ fn add_tri(
             overall_cluster_cut.insert(edge2);
         }
         edges.insert(edge2, new_edge(tri[0], u32::MAX));
-    } 
+    }
     // else {
     //     cur_cut.insert(edge2);
     // }
@@ -995,32 +1042,43 @@ fn add_tri(
     }
 }
 
-// orders the vertices consistently
-fn new_tri(a: u32, b: u32, c: u32) -> Triangle {
-    if a <= b {
-        if b <= c {
-            [a, b, c]
-        } else if c < a {
-            [c, a, b]
-        } else {
-            [a, c, b]
-        }
-    } else {
-        if a <= c {
-            [b, a, c]
-        } else if c < b {
-            [c, b, a]
-        } else {
-            [b, c, a]
+fn recalculate_shared_edges(index: usize, cluster: &mut SharedEdges, clusters: &Vec<Cluster>) {
+    let mut add = None;
+    let mut remove = None;
+
+    for cnxn_idx in 0..cluster.connections.len() {
+        if cluster.connections[cnxn_idx].0 == index {
+            let last_idx = clusters.len();
+            let combined1_interection_count = clusters[cluster.id]
+                .cut
+                .intersection(&clusters[last_idx - 1].cut)
+                .count();
+
+            let combined2_interection_count = clusters[cluster.id]
+                .cut
+                .intersection(&clusters[last_idx - 2].cut)
+                .count();
+
+            if combined1_interection_count > 0 {
+                cluster.connections[cnxn_idx].1 = combined1_interection_count as i32;
+
+                if combined2_interection_count > 0 {
+                    add = Some((cnxn_idx, combined1_interection_count as i32));
+                }
+            } else if combined2_interection_count > 0 {
+                cluster.connections[cnxn_idx].1 = combined2_interection_count as i32;
+            } else {
+                remove = Some(cnxn_idx);
+            }
+
+            break;
         }
     }
-}
 
-// orders the vertices consistently
-fn new_edge(a: u32, b: u32) -> Edge {
-    if a <= b {
-        [a, b]
-    } else {
-        [b, a]
+    if let Some(remove) = remove {
+        cluster.connections.remove(remove);
+    }
+    if let Some(add) = add {
+        cluster.connections.push(add);
     }
 }
