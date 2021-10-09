@@ -1,66 +1,252 @@
+use crate::utils::*;
+use core::panic;
+use std::cmp::Ordering;
 use std::collections::btree_set::Intersection;
 use std::collections::{HashMap, HashSet};
+use std::io::{BufWriter, Write};
 use std::{fs::File, io::prelude::*};
-use crate::utils::*;
 
 pub type Triangle = [u32; 3];
 pub type Edge = [u32; 2];
 pub type Point = [f32; 3];
 
 pub struct Mesh {
-    positions: Vec<f32>,
-    indices: Vec<u32>,
+    pub positions: Vec<f32>,
+    pub indices: Vec<u32>,
 }
 
 pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
-    let (edges, tris, vertices) =
-        generate_data_structures(&(mesh.indices.len() / 3), &mesh.indices);
-
-    let collapsible = Vec::<(f32, Edge)>::with_capacity(edges.len());
-    for edge in edges {
-        if edge.1[1] != u32::MAX {
-            collapsible.push((mesh.sqr_dist(edge.0[0], edge.0[1]), edge.0));
-        } else {
-            assert!(edge.1[0] != u32::MAX, "edge is not properly ordered");
-            // collapsible.push((mesh.sqr_dist(edge.0[0], edge.0[1]), edge.0));
-        }
-    }
-
-    let mut incident_mesh = Mesh { 
-        positions: mesh.positions.clone(),
-        indices: mesh.indices.clone()
-    };
-
-    collapsible.sort_by(|one, two| one.0.partial_cmp(&two.0).unwrap());
-
-    while incident_mesh.indices.len() > (target_tris * 3) as usize {
-        let is_collapsible = |edge: &Edge| {
-            // exactly 2 neigbouring vertices for each element in edge
-            let intsxn = sorted_vec_intersection_count(vertices.get(&edge[0]).unwrap(), vertices.get(&edge[1]).unwrap());
-            if intsxn == 2 {
-                // TODO detect flipped triangles
-                
-                
-                return true
-            }
-
-            false
+    let generate_necessary = |mesh: &Mesh| {
+        let incident_mesh = Mesh {
+            positions: mesh.positions.clone(),
+            indices: mesh.indices.clone(),
         };
 
-        let collapse = |edge: &Edge| {
-            let midpoint = mesh.mid_point_2(edge[0], edge[1]);
-            // remove the original 2 indices, the vec shortens
-            incident_mesh.positions.remove((edge[0]+0) as usize);
-            incident_mesh.positions.remove((edge[0]+1) as usize);
-            incident_mesh.positions.remove((edge[0]+2) as usize);
-            
-            incident_mesh.positions.remove((edge[1]+0) as usize);
-            incident_mesh.positions.remove((edge[1]+1) as usize);
-            incident_mesh.positions.remove((edge[1]+2) as usize);
+        let (edges, tris, vertices) =
+            generate_data_structures(&(incident_mesh.indices.len() / 3), &incident_mesh.indices);
 
-            let new_idx = incident_mesh.positions.len();
-            incident_mesh.positions.extend_from_slice(&midpoint);
-            incident_mesh.indices.push(new_idx as u32);
+        // !Every cluster has their own list of positions
+
+        let mut edge_verts = HashSet::<u32>::new();
+        for edge in &edges {
+            if edge.1[1] == u32::MAX || edge.1[0] == u32::MAX {
+                edge_verts.insert(edge.0[0]);
+                edge_verts.insert(edge.0[1]);
+            }
+        }
+
+        // println!("edge_verts: {:?}", edge_verts);
+
+        let mut collapsible = Vec::<(f32, Edge)>::with_capacity(edges.len());
+        for edge in &edges {
+            if !edge_verts.contains(&edge.0[0]) && !edge_verts.contains(&edge.0[1]) {
+                collapsible.push((incident_mesh.sqr_dist(edge.0[0], edge.0[1]), *edge.0));
+            }
+            // else {
+            //     println!("rejected: {:?}", *edge.0);
+            // }
+        }
+
+        let mut tri_dict = HashMap::new();
+        for tri in &tris {
+            {
+                let value = tri_dict.insert(tri[0], vec![new_edge(tri[1], tri[2])]);
+                if let Some(mut old) = value {
+                    if let Some(list) = tri_dict.get_mut(&tri[0]) {
+                        list.append(&mut old);
+                    }
+                }
+            };
+
+            {
+                let value = tri_dict.insert(tri[1], vec![new_edge(tri[0], tri[2])]);
+                if let Some(mut old) = value {
+                    if let Some(list) = tri_dict.get_mut(&tri[1]) {
+                        list.append(&mut old);
+                    }
+                }
+            };
+
+            {
+                let value = tri_dict.insert(tri[2], vec![new_edge(tri[0], tri[1])]);
+                if let Some(mut old) = value {
+                    if let Some(list) = tri_dict.get_mut(&tri[2]) {
+                        list.append(&mut old);
+                    }
+                }
+            };
+        }
+
+        collapsible.sort_by(|one, two| one.0.partial_cmp(&two.0).unwrap());
+
+        (incident_mesh, vertices, tris, edges, collapsible, tri_dict)
+    };
+
+    let (
+        mut incident_mesh, //
+        mut vertices,
+        mut tris,
+        mut edges,
+        mut collapsible,
+        mut tri_dict,
+    ) = generate_necessary(mesh);
+
+    // if true {
+    while incident_mesh.indices.len() > (target_tris * 3) as usize {
+        let is_collapsible = |edge: &Edge| {
+            let midpoint = incident_mesh.mid_point_2(edge[0], edge[1]);
+            // exactly 2 neigbouring vertices for each element in edge
+            let mut a = vertices.get(&edge[0]).unwrap().clone();
+            a.sort();
+            let mut b = vertices.get(&edge[1]).unwrap().clone();
+            b.sort();
+            let intsxn = sorted_vec_intersection_count(&a, &b);
+
+            if intsxn != 2 {
+                println!("shared verts condition: {}", intsxn);
+                return false;
+            }
+
+            // detect flipped triangles
+
+            // TODO flip conditions are currently wrong, they detect too many flips
+            // for every triangle with one of these vertices in it, calculate the cross product of the trangle, then again with the new vert, if the dot product between those two is negative, the triangle was flipped
+            for tri in tri_dict.get(&edge[0]).unwrap() {
+                let initial = {
+                    let edge1 = [
+                        incident_mesh.positions[edge[0] as usize + 0]
+                            - incident_mesh.positions[tri[0] as usize + 0],
+                        incident_mesh.positions[edge[0] as usize + 1]
+                            - incident_mesh.positions[tri[0] as usize + 1],
+                        incident_mesh.positions[edge[0] as usize + 2]
+                            - incident_mesh.positions[tri[0] as usize + 2],
+                    ];
+
+                    let edge2 = [
+                        incident_mesh.positions[edge[0] as usize + 0]
+                            - incident_mesh.positions[tri[1] as usize + 0],
+                        incident_mesh.positions[edge[0] as usize + 1]
+                            - incident_mesh.positions[tri[1] as usize + 1],
+                        incident_mesh.positions[edge[0] as usize + 2]
+                            - incident_mesh.positions[tri[1] as usize + 2],
+                    ];
+
+                    [
+                        (edge1[1] * edge2[2] - edge1[2] * edge2[1]),
+                        (edge1[0] * edge2[2] - edge1[2] * edge2[0]),
+                        (edge1[0] * edge2[1] - edge1[1] * edge2[0]),
+                    ]
+                };
+
+                let second = {
+                    let edge1 = [
+                        midpoint[0] - incident_mesh.positions[tri[0] as usize + 0],
+                        midpoint[1] - incident_mesh.positions[tri[0] as usize + 1],
+                        midpoint[2] - incident_mesh.positions[tri[0] as usize + 2],
+                    ];
+
+                    let edge2 = [
+                        midpoint[0] - incident_mesh.positions[tri[1] as usize + 0],
+                        midpoint[1] - incident_mesh.positions[tri[1] as usize + 1],
+                        midpoint[2] - incident_mesh.positions[tri[1] as usize + 2],
+                    ];
+
+                    [
+                        (edge1[1] * edge2[2] - edge1[2] * edge2[1]),
+                        (edge1[0] * edge2[2] - edge1[2] * edge2[0]),
+                        (edge1[0] * edge2[1] - edge1[1] * edge2[0]),
+                    ]
+                };
+
+                let dot_product =
+                    initial[0] * second[0] + initial[1] * second[1] + initial[2] * second[2];
+                if dot_product < 0.0 {
+                    println!("flip condition 1");
+                    return false;
+                }
+            }
+
+            for tri in tri_dict.get(&edge[1]).unwrap() {
+                let initial = {
+                    let edge1 = [
+                        incident_mesh.positions[edge[1] as usize + 0]
+                            - incident_mesh.positions[tri[0] as usize + 0],
+                        incident_mesh.positions[edge[1] as usize + 1]
+                            - incident_mesh.positions[tri[0] as usize + 1],
+                        incident_mesh.positions[edge[1] as usize + 2]
+                            - incident_mesh.positions[tri[0] as usize + 2],
+                    ];
+
+                    let edge2 = [
+                        incident_mesh.positions[edge[1] as usize + 0]
+                            - incident_mesh.positions[tri[1] as usize + 0],
+                        incident_mesh.positions[edge[1] as usize + 1]
+                            - incident_mesh.positions[tri[1] as usize + 1],
+                        incident_mesh.positions[edge[1] as usize + 2]
+                            - incident_mesh.positions[tri[1] as usize + 2],
+                    ];
+
+                    [
+                        (edge1[1] * edge2[2] - edge1[2] * edge2[1]),
+                        (edge1[0] * edge2[2] - edge1[2] * edge2[0]),
+                        (edge1[0] * edge2[1] - edge1[1] * edge2[0]),
+                    ]
+                };
+
+                let second = {
+                    let edge1 = [
+                        midpoint[0] - incident_mesh.positions[tri[0] as usize + 0],
+                        midpoint[1] - incident_mesh.positions[tri[0] as usize + 1],
+                        midpoint[2] - incident_mesh.positions[tri[0] as usize + 2],
+                    ];
+
+                    let edge2 = [
+                        midpoint[0] - incident_mesh.positions[tri[1] as usize + 0],
+                        midpoint[1] - incident_mesh.positions[tri[1] as usize + 1],
+                        midpoint[2] - incident_mesh.positions[tri[1] as usize + 2],
+                    ];
+
+                    [
+                        (edge1[1] * edge2[2] - edge1[2] * edge2[1]),
+                        (edge1[0] * edge2[2] - edge1[2] * edge2[0]),
+                        (edge1[0] * edge2[1] - edge1[1] * edge2[0]),
+                    ]
+                };
+
+                let dot_product =
+                    initial[0] * second[0] + initial[1] * second[1] + initial[2] * second[2];
+                if dot_product < 0.0 {
+                    println!("flip condition 2");
+                    return false;
+                }
+            }
+
+            true
+        };
+
+        let collapse = |edge: &Edge, incident_mesh: &mut Mesh| {
+            let midpoint = incident_mesh.mid_point_2(edge[0], edge[1]);
+            // -TEMP simplify run at the end will remove all unused
+            // remove the original 2 indices, the vec shortens
+            //
+            // removing is possible but super problematic, need to
+            // decrement the indices above the collapsed for every
+            // index in every data structure, safer for now to just
+            // do it at the end as this is likely not an impact on
+            // performance
+            //
+            // incident_mesh.positions.remove((edge[0] + 0) as usize);
+            // incident_mesh.positions.remove((edge[0] + 0) as usize);
+            // incident_mesh.positions.remove((edge[0] + 0) as usize);
+            //
+            // incident_mesh.positions.remove((edge[1] + 0) as usize);
+            // incident_mesh.positions.remove((edge[1] + 0) as usize);
+            // incident_mesh.positions.remove((edge[1] + 0) as usize);
+
+            let new_idx = incident_mesh.positions.len() / 3;
+            incident_mesh.positions.push(midpoint[0]);
+            incident_mesh.positions.push(midpoint[1]);
+            incident_mesh.positions.push(midpoint[2]);
 
             // move all indices pointing to an index that got moved
             for idx in &mut incident_mesh.indices {
@@ -68,27 +254,583 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
                     *idx = new_idx as u32;
                 }
 
-                if *idx > edge[0] {
-                    *idx -= 1;
-                }
+                //                 if *idx > edge[0] {
+                //                     *idx -= 1;
+                //                 }
+                //
+                //                 if *idx > edge[1] {
+                //                     *idx -= 1;
+                //                 }
+            }
 
-                if *idx > edge[1] {
-                    *idx -= 1;
+            let mut removals = Vec::with_capacity(2);
+            for idx in (0..incident_mesh.indices.len()).step_by(3) {
+                // removing degenerate triangles, ie vert = vert
+                if incident_mesh.indices[idx] == incident_mesh.indices[idx + 1]
+                    || incident_mesh.indices[idx] == incident_mesh.indices[idx + 2]
+                    || incident_mesh.indices[idx + 1] == incident_mesh.indices[idx + 2]
+                {
+                    removals.push(idx);
                 }
             }
+            // removing a triangle, remove the index of the first then second then third vertices in the triangle
+            // removals.sort_by(|a, b| { b.cmp(a) });
+            for r in removals.into_iter().rev() {
+                incident_mesh.indices.remove(r);
+                incident_mesh.indices.remove(r);
+                incident_mesh.indices.remove(r);
+            }
+
+            (midpoint, new_idx as u32)
         };
 
-        let idx = 0;
-        while !is_collapsible(&collapsible[idx].1) {
-            idx += 1;
+        if collapsible.is_empty() {
+            println!("positions: {}", incident_mesh.positions.len());
+            println!("indices: {}", incident_mesh.indices.len());
+            panic!("This mesh cannot be simplified");
         }
 
-        collapse(&collapsible[idx].1);
+        let mut idx = 0;
+        while !is_collapsible(&collapsible[idx].1) {
+            idx += 1;
 
-        // TODO recalculate collapsible
+            if idx == collapsible.len() {
+                println!("positions: {}", incident_mesh.positions.len());
+                println!("indices: {}", incident_mesh.indices.len());
+                println!("This mesh cannot be simplified further");
+                // panic!("This mesh cannot be simplified");
+                return incident_mesh;
+                // panic!("not further collapsible");
+            }
+        }
+        let collapsed = collapsible[idx].1;
+
+        println!("collapsed: {:?}", collapsed);
+        let new_point = collapse(&collapsed, &mut incident_mesh);
+
+        // sanity check
+        let removed_collapsed = collapsible.remove(idx);
+        assert!(collapsed[0] == removed_collapsed.1[0] && collapsed[1] == removed_collapsed.1[1]);
+
+        // need to combine the edges that end up being the same
+        edges.remove(&collapsed);
+        {
+            let mut removals = Vec::new();
+            let mut additions = Vec::new();
+            for kv in &mut edges {
+                let mut replaced = 0;
+                let mut key_changed = false;
+
+                let mut new_kv = (kv.0.clone(), kv.1.clone());
+                if new_kv.0[0] == collapsed[0] || new_kv.0[0] == collapsed[1] {
+                    new_kv.0[0] = new_point.1;
+                    key_changed = true;
+                    replaced += 1;
+                }
+
+                if new_kv.0[1] == collapsed[0] || new_kv.0[1] == collapsed[1] {
+                    new_kv.0[1] = new_point.1;
+                    key_changed = true;
+                    replaced += 1;
+                }
+
+                if kv.1[0] == collapsed[0] || kv.1[0] == collapsed[1] {
+                    if key_changed {
+                        new_kv.1[0] = u32::MAX;
+                    } else {
+                        kv.1[0] = new_point.1;
+                    }
+                    replaced += 1;
+                }
+
+                if kv.1[1] == collapsed[0] || kv.1[1] == collapsed[1] {
+                    if key_changed {
+                        new_kv.1[1] = u32::MAX;
+                    } else {
+                        kv.1[1] = new_point.1;
+                    }
+                    replaced += 1;
+                }
+
+                if replaced >= 2 || key_changed {
+                    removals.push(kv.0.clone());
+                } else if replaced > 0 {
+                    *kv.1 = new_edge(kv.1[0], kv.1[1]);
+                }
+
+                if key_changed {
+                    additions.push(new_kv);
+                }
+            }
+
+            for r in removals {
+                edges.remove(&r);
+            }
+
+            for a in additions {
+                let key = new_edge(a.0[0], a.0[1]);
+                let val = new_edge(a.1[0], a.1[1]);
+                let old = edges.insert(key, val);
+                if let Some(old) = old {
+                    // println!("for key: {:?}, old: {:?}, value: {:?}", key, old, value);
+                    let new = new_edge(
+                        if old[0] == u32::MAX { old[1] } else { old[0] },
+                        if val[0] == u32::MAX { val[1] } else { val[0] },
+                    );
+                    assert!(new[0] != u32::MAX && new[1] != u32::MAX);
+                    edges.insert(key, new);
+                }
+            }
+        }
+
+        // tris.remove(r);
+        {
+            let mut removals = Vec::new();
+            let mut additions = Vec::new();
+            for tri in tris.iter() {
+                let mut count = 0;
+                let mut add: Triangle = [0, 0, 0];
+                if tri[0] == collapsed[0] || tri[0] == collapsed[1] {
+                    count += 1;
+                    add = new_tri(new_point.1, tri[1], tri[2]);
+                }
+                if tri[1] == collapsed[0] || tri[1] == collapsed[1] {
+                    count += 1;
+                    add = new_tri(new_point.1, tri[0], tri[2]);
+                }
+                if tri[2] == collapsed[0] || tri[2] == collapsed[1] {
+                    count += 1;
+                    add = new_tri(new_point.1, tri[0], tri[1]);
+                }
+
+                if count > 1 {
+                    removals.push(tri.clone());
+                }
+
+                if count == 1 {
+                    removals.push(tri.clone());
+                    additions.push(add);
+                }
+            }
+            for r in removals {
+                tris.remove(&r);
+            }
+            for add in additions {
+                tris.insert(add);
+            }
+        }
+
+        // vertices.remove();
+        {
+            let mut combined = Vec::<u32>::new();
+            let a = vertices.get(&collapsed[0]).unwrap().clone();
+            let b = vertices.get(&collapsed[1]).unwrap().clone();
+            let mut adjacent = HashSet::with_capacity(a.len() + b.len());
+            adjacent.extend(a);
+            adjacent.extend(b);
+            for adj in &adjacent {
+                let mut idx = None;
+                let mut already_in = false;
+                for vert in vertices.get_mut(adj).unwrap().iter_mut().enumerate() {
+                    if *vert.1 == collapsed[0] || *vert.1 == collapsed[1] {
+                        *vert.1 = new_point.1;
+                        if already_in {
+                            idx = Some(vert.0);
+                        } else {
+                            already_in = true;
+                        }
+                    }
+                }
+
+                if let Some(value) = idx {
+                    vertices.get_mut(adj).unwrap().swap_remove(value);
+                }
+            }
+            combined.extend(adjacent);
+
+            let mut idx = 0;
+            while idx < combined.len() {
+                if combined[idx] == collapsed[0] {
+                    combined.remove(idx);
+                } else if combined[idx] == collapsed[1] {
+                    combined.remove(idx);
+                } else {
+                    idx += 1;
+                }
+            }
+
+            vertices.remove(&collapsed[0]);
+            vertices.remove(&collapsed[1]);
+
+            vertices.insert(new_point.1, combined);
+        }
+
+        // tri_dict.remove();
+        // (67, [[84, 161], [66, 74], [294, 294]
+        // (55, [[294, 294],
+        {
+            let mut swaps = Vec::new();
+            let mut removals = Vec::new();
+            let mut combined = Vec::new();
+            for edge in tri_dict.get(&collapsed[0]).unwrap() {
+                if edge[0] == collapsed[1] || edge[1] == collapsed[1] {
+                    removals.push(edge[0]);
+                    removals.push(edge[1]);
+                } else {
+                    swaps.push(edge[0]);
+                    swaps.push(edge[1]);
+                    combined.push(*edge);
+                }
+            }
+
+            for edge in tri_dict.get(&collapsed[1]).unwrap() {
+                if edge[0] == collapsed[0] || edge[1] == collapsed[0] {
+                    removals.push(edge[0]);
+                    removals.push(edge[1]);
+                } else {
+                    swaps.push(edge[0]);
+                    swaps.push(edge[1]);
+                    combined.push(*edge);
+                }
+            }
+
+            for swap in swaps {
+                let mut idx = 0;
+                let mut rs = Vec::new();
+                for edge in tri_dict.get_mut(&swap).unwrap() {
+                    if edge[0] == collapsed[0] || edge[0] == collapsed[1] {
+                        edge[0] = new_point.1;
+                    }
+
+                    if edge[1] == collapsed[0] || edge[1] == collapsed[1] {
+                        edge[1] = new_point.1;
+                    }
+
+                    if edge[0] == edge[1] {
+                        rs.push(idx);
+                    }
+
+                    *edge = new_edge(edge[0], edge[1]);
+                    idx += 1;
+                }
+
+                let edges = tri_dict.get_mut(&swap).unwrap();
+                for r in rs {
+                    edges.remove(r);
+                }
+            }
+
+            for rem in removals {
+                let mut removals = Vec::new();
+                for edge in tri_dict.get(&rem).unwrap().iter().enumerate() {
+                    if edge.1[0] == collapsed[1] || edge.1[1] == collapsed[1] {
+                        removals.push(edge.0);
+                    }
+                }
+                let m = tri_dict.get_mut(&rem).unwrap();
+                for r in removals.into_iter().rev() {
+                    m.remove(r);
+                }
+            }
+
+            tri_dict.remove(&collapsed[0]);
+            tri_dict.remove(&collapsed[1]);
+            tri_dict.insert(new_point.1, combined);
+        }
+
+        // collapsible
+        {
+            let mut contained = Vec::new();
+            let mut removals = Vec::new();
+            let mut idx: usize = 0;
+            for edge in &mut collapsible {
+                if edge.1[0] == collapsed[0] || edge.1[0] == collapsed[1] {
+                    edge.1[0] = new_point.1;
+                    if contained.contains(&edge.1[1]) {
+                        removals.push(idx);
+                    } else {
+                        contained.push(edge.1[1]);
+                        edge.0 = incident_mesh.sqr_dist(edge.1[0], edge.1[1]);
+                        edge.1 = new_edge(edge.1[0], edge.1[1]);
+                    }
+                } else if edge.1[1] == collapsed[0] || edge.1[1] == collapsed[1] {
+                    edge.1[1] = new_point.1;
+                    if contained.contains(&edge.1[0]) {
+                        removals.push(idx);
+                    } else {
+                        contained.push(edge.1[0]);
+                        edge.0 = incident_mesh.sqr_dist(edge.1[0], edge.1[1]);
+                        edge.1 = new_edge(edge.1[0], edge.1[1]);
+                    }
+                }
+
+                idx += 1;
+            }
+
+            for r in removals.into_iter().rev() {
+                // let removed =
+                collapsible.remove(r);
+                // println!("removed: {:?}", removed);
+            }
+            // println!("contained: {:?}", contained);
+
+            collapsible.sort_by(|one, two| one.0.partial_cmp(&two.0).unwrap());
+        };
+
+        // break;
+        // TODO write tests to validate the patching of all data structures by regenerating them and then comparing them to the regenerated versions
+        // TODO make this a traditional rust test, so I can use the testing framework
+        // ?DEBUG TEST
+        {
+            let write_file = File::create("./logs/log").unwrap();
+            let mut writer = BufWriter::new(&write_file);
+
+            let (
+                t_incident_mesh,
+                mut t_vertices,
+                t_tris,
+                mut t_edges,
+                t_collapsible,
+                mut t_tri_dict,
+            ) = generate_necessary(&incident_mesh);
+
+            let mesh_positions;
+            let mesh_indices;
+            let mut vertices_map;
+            let tris_set;
+            let mut edges_map;
+            let collapsible_vec;
+            let mut tri_dict_map;
+
+            // compare t_incident_mesh
+            {
+                mesh_indices =
+                    compare_vecs_w_order(&t_incident_mesh.indices, &incident_mesh.indices);
+                mesh_positions =
+                    compare_vecs_w_order(&t_incident_mesh.positions, &incident_mesh.positions);
+
+                if !mesh_indices {
+                    write!(writer, "mesh_indices_t: \n{:?} \n", t_incident_mesh.indices);
+                    write!(
+                        writer,
+                        "mesh_indices_o: \n{:?} \n\n\n\n\n",
+                        incident_mesh.indices
+                    );
+                }
+                if !mesh_positions {
+                    write!(
+                        writer,
+                        "mesh_positions_t: \n{:?} \n\n\n\n\n",
+                        t_incident_mesh.positions
+                    );
+                    write!(
+                        writer,
+                        "mesh_positions_o: \n{:?} \n\n\n\n\n",
+                        incident_mesh.positions
+                    );
+                }
+            };
+
+            // compare t_vertices
+            {
+                vertices_map = true;
+                for kv in &vertices {
+                    if let Some(value) = t_vertices.get(kv.0) {
+                        if !compare_vecs_no_order(kv.1, value) {
+                            vertices_map = false;
+                            break;
+                        }
+                    } else {
+                        vertices_map = false;
+                        break;
+                    }
+
+                    t_vertices.remove(kv.0);
+                }
+
+                if vertices_map && t_vertices.len() > 0 {
+                    vertices_map = false;
+                }
+
+                if !vertices_map {
+                    let mut t = t_vertices.iter().collect::<Vec<(&u32, &Vec<u32>)>>();
+                    t.sort();
+                    let mut o = vertices.iter().collect::<Vec<(&u32, &Vec<u32>)>>();
+                    o.sort();
+
+                    write!(writer, "vertices_t: \n{:?} \n", t);
+                    write!(writer, "vertices_o: \n{:?} \n\n\n\n\n", o);
+                }
+            };
+
+            // compare t_tris
+            {
+                tris_set = t_tris == tris;
+
+                if !tris_set {
+                    write!(writer, "tris_t: \n{:?} \n", t_tris);
+                    write!(writer, "tris_o: \n{:?} \n\n\n\n\n", tris);
+                }
+            };
+
+            // compare t_edges
+            {
+                edges_map = true;
+                for kv in &edges {
+                    if let Some(value) = t_edges.get(kv.0) {
+                        if kv.1[0] != value[0] || kv.1[1] != value[1] {
+                            edges_map = false;
+                            break;
+                        } else if kv.1[0] == value[1] && kv.1[1] == value[0] {
+                            println!("An edge is flipped in the map: {:?}=>{:?}", kv.0, kv.1);
+                            edges_map = false;
+                            break;
+                        }
+                    } else {
+                        edges_map = false;
+                        break;
+                    }
+
+                    t_edges.remove(kv.0);
+                }
+
+                if edges_map && t_edges.len() > 0 {
+                    edges_map = false;
+                }
+
+                if !edges_map {
+                    let mut t = t_edges.iter().collect::<Vec<(&Edge, &Edge)>>();
+                    t.sort();
+                    let mut o = edges.iter().collect::<Vec<(&Edge, &Edge)>>();
+                    o.sort();
+
+                    write!(writer, "edges_map_t: \n{:?} \n", t);
+                    write!(writer, "edges_map_o: \n{:?} \n\n\n\n\n", o);
+                }
+            };
+
+            // compare t_collapsible
+            {
+                let compare = |a: &(f32, Edge), b: &(f32, Edge)| {
+                    let cmp = a.0.partial_cmp(&b.0).unwrap();
+                    if cmp == Ordering::Equal {
+                        let cmp = a.1[0].cmp(&b.1[0]);
+                        if cmp == Ordering::Equal {
+                            return a.1[1].cmp(&b.1[1]);
+                        }
+                        return cmp;
+                    }
+
+                    cmp
+                };
+                collapsible_vec = compare_vecs_no_order_customeq(
+                    &t_collapsible,
+                    &collapsible,
+                    &compare,
+                    &|a: &(f32, Edge), b: &(f32, Edge)| a.1[0] == b.1[0] && a.1[1] == b.1[1],
+                );
+
+                // println!(
+                //     "len o: {}, len t: {}",
+                //     collapsible.len(),
+                //     t_collapsible.len()
+                // );
+
+                if !collapsible_vec {
+                    let mut t = t_collapsible.clone();
+                    t.sort_by(compare);
+                    let mut o = collapsible.clone();
+                    o.sort_by(compare);
+
+                    write!(writer, "collapsible_vec_t: \n{:?} \n", t);
+                    write!(writer, "collapsible_vec_o: \n{:?} \n\n\n\n\n", o);
+                }
+            };
+
+            // compare t_tri_dict
+            {
+                let compare = |a: &Edge, b: &Edge| {
+                    let cmp = a.cmp(&b);
+                    if cmp == Ordering::Equal {
+                        return a[1].cmp(&b[1]);
+                    }
+
+                    cmp
+                };
+                tri_dict_map = true;
+                for kv in &tri_dict {
+                    if let Some(value) = t_tri_dict.get(kv.0) {
+                        if !compare_vecs_no_order_customeq(
+                            kv.1,
+                            value,
+                            &compare,
+                            &|a: &Edge, b: &Edge| a[0] == b[0] && a[1] == b[1],
+                        ) {
+                            tri_dict_map = false;
+                            break;
+                        }
+                    } else {
+                        tri_dict_map = false;
+                        break;
+                    }
+
+                    t_tri_dict.remove(kv.0);
+                }
+
+                if tri_dict_map && t_tri_dict.len() > 0 {
+                    tri_dict_map = false;
+                }
+
+                if !tri_dict_map {
+                    let mut t = t_tri_dict
+                        .clone()
+                        .into_iter()
+                        .collect::<Vec<(u32, Vec<Edge>)>>();
+                    t.sort();
+                    for e in &mut t {
+                        e.1.sort();
+                    }
+                    let mut o = tri_dict
+                        .clone()
+                        .into_iter()
+                        .collect::<Vec<(u32, Vec<Edge>)>>();
+                    o.sort();
+                    for e in &mut o {
+                        e.1.sort();
+                    }
+
+                    write!(writer, "tri_dict_t: \n{:?} \n", t);
+                    write!(writer, "tri_dict_o: \n{:?} \n\n\n\n\n", o);
+                }
+            };
+
+            println!("Test Run");
+            println!("mesh_indices: {}", mesh_indices);
+            println!("mesh_positions: {}", mesh_positions);
+            println!("vertices_map: {}", vertices_map);
+            println!("tris_set: {}", tris_set);
+            println!("edges_map: {}", edges_map);
+            println!("collapsible_vec: {}", collapsible_vec);
+            println!("tri_dict_map: {}", tri_dict_map);
+            println!("Test Run Complete \n\n\n");
+
+            if !(mesh_positions
+                && mesh_indices
+                && vertices_map
+                && tris_set
+                && edges_map
+                && collapsible_vec
+                && tri_dict_map)
+            {
+                panic!("Test Run Failed");
+            }
+        }
     }
+    // };
 
-    incident_mesh
+    let (indices, positions) =
+        simplify_indices_positions(&incident_mesh.indices, &incident_mesh.positions);
+    Mesh { indices, positions }
 }
 
 pub fn generate_data_structures(
@@ -102,7 +844,6 @@ pub fn generate_data_structures(
     let mut edges = HashMap::<Edge, [u32; 2]>::with_capacity(tri_count * 24);
     let mut tris = HashSet::<Triangle>::with_capacity(*tri_count);
     let mut vertices: HashMap<u32, Vec<u32>> = HashMap::new();
-    //
 
     // SECTION - Fill vertices, tris, edges and boundary edges
     {
@@ -117,39 +858,48 @@ pub fn generate_data_structures(
                 let key: Edge = new_edge(idx0, idx1);
                 let value = edges.insert(key, [idx2, u32::MAX]);
                 if let Some(v) = value {
-                    if v[1] != u32::MAX {
-                        println!(
-                            "this edge has appeared more than twice: {:?} => {:?}",
-                            idx2, v
-                        );
-                    }
-                    edges.insert(key, [idx2, v[0]]);
+                    // if v[1] != u32::MAX {
+                    //     println!(
+                    //         "this edge has appeared more than twice: {:?} => {:?}",
+                    //         idx2, v
+                    //     );
+                    // }
+                    // if v[0] == key[0] || v[0] == key[1] {
+                    //     println!("something is wrong 1");
+                    // }
+                    edges.insert(key, new_edge(idx2, v[0]));
                 }
             }
             {
                 let key: Edge = new_edge(idx0, idx2);
                 let value = edges.insert(key, [idx1, u32::MAX]);
                 if let Some(v) = value {
-                    if v[1] != u32::MAX {
-                        println!(
-                            "this edge has appeared more than twice: {:?} => {:?}",
-                            idx2, v
-                        );
-                    }
-                    edges.insert(key, [idx1, v[0]]);
+                    // if v[1] != u32::MAX {
+                    //     println!(
+                    //         "this edge has appeared more than twice: {:?} => {:?}",
+                    //         idx1, v
+                    //     );
+                    // }
+                    // if v[0] == key[0] || v[0] == key[1] {
+                    //     println!("something is wrong 2");
+                    // }
+                    edges.insert(key, new_edge(idx1, v[0]));
                 }
             }
             {
                 let key: Edge = new_edge(idx1, idx2);
                 let value = edges.insert(key, [idx0, u32::MAX]);
                 if let Some(v) = value {
-                    if v[1] != u32::MAX {
-                        println!(
-                            "this edge has appeared more than twice: {:?} => {:?}",
-                            idx2, v
-                        );
-                    }
-                    edges.insert(key, [idx0, v[0]]);
+                    // if v[1] != u32::MAX {
+                    //     println!(
+                    //         "this edge has appeared more than twice: {:?} => {:?}",
+                    //         idx0, v
+                    //     );
+                    // }
+                    // if v[0] == key[0] || v[0] == key[1] {
+                    //     println!("something is wrong 3");
+                    // }
+                    edges.insert(key, new_edge(idx0, v[0]));
                 }
             }
 
@@ -266,6 +1016,64 @@ pub fn write_mesh_to_file(name: &str, positions: &Vec<f32>, mesh: &Vec<u32>) {
     f.write_all("\n".as_bytes()).unwrap();
 
     f.flush().unwrap();
+}
+
+pub fn simplify_indices_positions(
+    indices: &Vec<u32>,
+    positions: &Vec<f32>,
+) -> (Vec<u32>, Vec<f32>) {
+    let mut mesh_positions = Vec::new();
+    let mut mesh_indices = Vec::new();
+    {
+        let mut existing = HashMap::new();
+        let mut idx: u32 = 0;
+        for i in indices {
+            if let Some(value) = existing.get(i) {
+                mesh_indices.push(*value);
+            } else {
+                existing.insert(i, idx);
+                mesh_indices.push(idx);
+
+                mesh_positions.push(positions[*i as usize * 3 + 0]);
+                mesh_positions.push(positions[*i as usize * 3 + 1]);
+                mesh_positions.push(positions[*i as usize * 3 + 2]);
+
+                idx += 1;
+            }
+        }
+    };
+
+    // DEBUG VALIDATION
+    //     {
+    //         for i in 0..indices.len() {
+    //             let oidx = indices[i];
+    //             let nidx = mesh_indices[i];
+    //             println!(
+    //                 "{}:[{}, {}, {}] => {}:[{}, {}, {}]",
+    //                 oidx,
+    //                 positions[oidx as usize],
+    //                 positions[oidx as usize + 1],
+    //                 positions[oidx as usize + 2],
+    //                 nidx,
+    //                 mesh_positions[nidx as usize],
+    //                 mesh_positions[nidx as usize + 1],
+    //                 mesh_positions[nidx as usize + 2]
+    //             );
+    //
+    //             if mesh_positions[nidx as usize] != positions[oidx as usize]
+    //                 || mesh_positions[nidx as usize + 1] != positions[oidx as usize + 1]
+    //                 || mesh_positions[nidx as usize + 2] != positions[oidx as usize + 2]
+    //             {
+    //                 panic!("indices and position simplification failed!");
+    //             }
+    //
+    //             if i % 3 == 0 {
+    //                 println!("");
+    //             }
+    //         }
+    //     }
+
+    (mesh_indices, mesh_positions)
 }
 
 impl Mesh {

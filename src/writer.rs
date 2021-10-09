@@ -280,7 +280,6 @@ pub fn write(obj_file: &String) {
                     if let Some(verts) = edges.get(edge) {
                         let vert = if verts[0] == u32::MAX {
                             if verts[1] == u32::MAX {
-                                // panic!("Both verts were u32::MAX. This should not be possible.");
                                 println!("Both verts were u32::MAX. This should not be possible.");
                                 break 'cluster_generation;
                             }
@@ -431,16 +430,17 @@ pub fn write(obj_file: &String) {
                 //     .symmetric_difference(&clusters[share2.0].cut).map(|value| { value.clone() }).collect::<HashSet<[u32; 2]>>()
                 //     .symmetric_difference(&clusters[share3.0].cut).map(|value| { value.clone() }).collect::<HashSet<[u32; 2]>>();
 
-                let vertices_in_bytes = unsafe {
-                    std::slice::from_raw_parts(
-                        mesh.positions.as_ptr() as *const u8,
-                        mesh.positions.len() * 4,
-                    )
+                let (mesh_indices, mesh_positions) = simplify_indices_positions(&indices, &mesh.positions);
+
+                println!("max index: {}, positions len: {}", mesh_indices.iter().max().unwrap(), mesh_positions.len());
+
+                let combined = Mesh {
+                    positions: mesh_positions,
+                    indices: mesh_indices,
                 };
 
-
                 // mesh simplification
-
+                let cluster = simplify(&combined, (TRIS_IN_CLUSTER * 2) as u32);
 
                 println!("writing original with {} indices", indices.len());
                 write_mesh_to_file("original", &mesh.positions, &indices);
@@ -484,12 +484,9 @@ pub fn write(obj_file: &String) {
                     "cluster4",
                     &mesh.positions,
                     &clusters[share3.0].tris.iter().flatten().cloned().collect(),
-                );                
-                println!(
-                    "writing new_indices with {} tris",
-                    new_indices.len() / 3
                 );
-                write_mesh_to_file("new_indices", &mesh.positions, &new_indices);
+                println!("writing new_indices with {} tris", cluster.indices.len() / 3);
+                write_mesh_to_file("new_indices", &cluster.positions, &cluster.indices);
 
                 panic!();
 
@@ -500,7 +497,7 @@ pub fn write(obj_file: &String) {
                 // cluster_dict.remove(&share3.0);
 
                 // calculate new cut
-                let (_, tris, _) = generate_data_structures(&(new_indices.len() / 3), &new_indices);
+                let (_, tris, _) = generate_data_structures(&(cluster.indices.len() / 3), &cluster.indices);
 
                 let combined_anchor = calculate_anchor(&tris.iter().collect(), &mid_point_3);
                 // split cluster into 2, choose any triangle on the border as a seed, same algorithm as above
