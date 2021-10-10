@@ -1,14 +1,15 @@
 use crate::utils::*;
 use core::panic;
 use std::cmp::Ordering;
-use std::collections::btree_set::Intersection;
 use std::collections::{HashMap, HashSet};
+use std::fs::File;
 use std::io::{BufWriter, Write};
-use std::{fs::File, io::prelude::*};
 
 pub type Triangle = [u32; 3];
 pub type Edge = [u32; 2];
 pub type Point = [f32; 3];
+
+const TESTING: bool = false;
 
 pub struct Mesh {
     pub positions: Vec<f32>,
@@ -22,8 +23,7 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
             indices: mesh.indices.clone(),
         };
 
-        let (edges, tris, vertices) =
-            generate_data_structures(&(incident_mesh.indices.len() / 3), &incident_mesh.indices);
+        let (edges, tris, vertices) = generate_data_structures(&incident_mesh.indices);
 
         // !Every cluster has their own list of positions
 
@@ -82,6 +82,8 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
         (incident_mesh, vertices, tris, edges, collapsible, tri_dict)
     };
 
+    // let mut flipped_count = 0;
+
     let (
         mut incident_mesh, //
         mut vertices,
@@ -109,51 +111,44 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
 
             // detect flipped triangles
 
-            // TODO flip conditions are currently wrong, they detect too many flips
             // for every triangle with one of these vertices in it, calculate the cross product of the trangle, then again with the new vert, if the dot product between those two is negative, the triangle was flipped
             for tri in tri_dict.get(&edge[0]).unwrap() {
-                let initial = {
-                    let edge1 = [
-                        incident_mesh.positions[edge[0] as usize + 0]
-                            - incident_mesh.positions[tri[0] as usize + 0],
-                        incident_mesh.positions[edge[0] as usize + 1]
-                            - incident_mesh.positions[tri[0] as usize + 1],
-                        incident_mesh.positions[edge[0] as usize + 2]
-                            - incident_mesh.positions[tri[0] as usize + 2],
-                    ];
+                let edge1 = [
+                    incident_mesh.positions[tri[1] as usize * 3 + 0]
+                        - incident_mesh.positions[tri[0] as usize * 3 + 0],
+                    incident_mesh.positions[tri[1] as usize * 3 + 1]
+                        - incident_mesh.positions[tri[0] as usize * 3 + 1],
+                    incident_mesh.positions[tri[1] as usize * 3 + 2]
+                        - incident_mesh.positions[tri[0] as usize * 3 + 2],
+                ];
 
+                let initial = {
                     let edge2 = [
-                        incident_mesh.positions[edge[0] as usize + 0]
-                            - incident_mesh.positions[tri[1] as usize + 0],
-                        incident_mesh.positions[edge[0] as usize + 1]
-                            - incident_mesh.positions[tri[1] as usize + 1],
-                        incident_mesh.positions[edge[0] as usize + 2]
-                            - incident_mesh.positions[tri[1] as usize + 2],
+                        incident_mesh.positions[edge[0] as usize * 3 + 0]
+                            - incident_mesh.positions[tri[0] as usize * 3 + 0],
+                        incident_mesh.positions[edge[0] as usize * 3 + 1]
+                            - incident_mesh.positions[tri[0] as usize * 3 + 1],
+                        incident_mesh.positions[edge[0] as usize * 3 + 2]
+                            - incident_mesh.positions[tri[0] as usize * 3 + 2],
                     ];
 
                     [
                         (edge1[1] * edge2[2] - edge1[2] * edge2[1]),
-                        (edge1[0] * edge2[2] - edge1[2] * edge2[0]),
+                        (edge1[2] * edge2[0] - edge1[0] * edge2[2]),
                         (edge1[0] * edge2[1] - edge1[1] * edge2[0]),
                     ]
                 };
 
                 let second = {
-                    let edge1 = [
-                        midpoint[0] - incident_mesh.positions[tri[0] as usize + 0],
-                        midpoint[1] - incident_mesh.positions[tri[0] as usize + 1],
-                        midpoint[2] - incident_mesh.positions[tri[0] as usize + 2],
-                    ];
-
                     let edge2 = [
-                        midpoint[0] - incident_mesh.positions[tri[1] as usize + 0],
-                        midpoint[1] - incident_mesh.positions[tri[1] as usize + 1],
-                        midpoint[2] - incident_mesh.positions[tri[1] as usize + 2],
+                        midpoint[0] - incident_mesh.positions[tri[0] as usize * 3 + 0],
+                        midpoint[1] - incident_mesh.positions[tri[0] as usize * 3 + 1],
+                        midpoint[2] - incident_mesh.positions[tri[0] as usize * 3 + 2],
                     ];
 
                     [
                         (edge1[1] * edge2[2] - edge1[2] * edge2[1]),
-                        (edge1[0] * edge2[2] - edge1[2] * edge2[0]),
+                        (edge1[2] * edge2[0] - edge1[0] * edge2[2]),
                         (edge1[0] * edge2[1] - edge1[1] * edge2[0]),
                     ]
                 };
@@ -161,54 +156,47 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
                 let dot_product =
                     initial[0] * second[0] + initial[1] * second[1] + initial[2] * second[2];
                 if dot_product < 0.0 {
-                    println!("flip condition 1");
                     return false;
                 }
             }
 
             for tri in tri_dict.get(&edge[1]).unwrap() {
-                let initial = {
-                    let edge1 = [
-                        incident_mesh.positions[edge[1] as usize + 0]
-                            - incident_mesh.positions[tri[0] as usize + 0],
-                        incident_mesh.positions[edge[1] as usize + 1]
-                            - incident_mesh.positions[tri[0] as usize + 1],
-                        incident_mesh.positions[edge[1] as usize + 2]
-                            - incident_mesh.positions[tri[0] as usize + 2],
-                    ];
+                let edge1 = [
+                    incident_mesh.positions[tri[1] as usize * 3 + 0]
+                        - incident_mesh.positions[tri[0] as usize * 3 + 0],
+                    incident_mesh.positions[tri[1] as usize * 3 + 1]
+                        - incident_mesh.positions[tri[0] as usize * 3 + 1],
+                    incident_mesh.positions[tri[1] as usize * 3 + 2]
+                        - incident_mesh.positions[tri[0] as usize * 3 + 2],
+                ];
 
+                let initial = {
                     let edge2 = [
-                        incident_mesh.positions[edge[1] as usize + 0]
-                            - incident_mesh.positions[tri[1] as usize + 0],
-                        incident_mesh.positions[edge[1] as usize + 1]
-                            - incident_mesh.positions[tri[1] as usize + 1],
-                        incident_mesh.positions[edge[1] as usize + 2]
-                            - incident_mesh.positions[tri[1] as usize + 2],
+                        incident_mesh.positions[edge[1] as usize * 3 + 0]
+                            - incident_mesh.positions[tri[0] as usize * 3 + 0],
+                        incident_mesh.positions[edge[1] as usize * 3 + 1]
+                            - incident_mesh.positions[tri[0] as usize * 3 + 1],
+                        incident_mesh.positions[edge[1] as usize * 3 + 2]
+                            - incident_mesh.positions[tri[0] as usize * 3 + 2],
                     ];
 
                     [
                         (edge1[1] * edge2[2] - edge1[2] * edge2[1]),
-                        (edge1[0] * edge2[2] - edge1[2] * edge2[0]),
+                        (edge1[2] * edge2[0] - edge1[0] * edge2[2]),
                         (edge1[0] * edge2[1] - edge1[1] * edge2[0]),
                     ]
                 };
 
                 let second = {
-                    let edge1 = [
-                        midpoint[0] - incident_mesh.positions[tri[0] as usize + 0],
-                        midpoint[1] - incident_mesh.positions[tri[0] as usize + 1],
-                        midpoint[2] - incident_mesh.positions[tri[0] as usize + 2],
-                    ];
-
                     let edge2 = [
-                        midpoint[0] - incident_mesh.positions[tri[1] as usize + 0],
-                        midpoint[1] - incident_mesh.positions[tri[1] as usize + 1],
-                        midpoint[2] - incident_mesh.positions[tri[1] as usize + 2],
+                        midpoint[0] - incident_mesh.positions[tri[0] as usize * 3 + 0],
+                        midpoint[1] - incident_mesh.positions[tri[0] as usize * 3 + 1],
+                        midpoint[2] - incident_mesh.positions[tri[0] as usize * 3 + 2],
                     ];
 
                     [
                         (edge1[1] * edge2[2] - edge1[2] * edge2[1]),
-                        (edge1[0] * edge2[2] - edge1[2] * edge2[0]),
+                        (edge1[2] * edge2[0] - edge1[0] * edge2[2]),
                         (edge1[0] * edge2[1] - edge1[1] * edge2[0]),
                     ]
                 };
@@ -216,7 +204,6 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
                 let dot_product =
                     initial[0] * second[0] + initial[1] * second[1] + initial[2] * second[2];
                 if dot_product < 0.0 {
-                    println!("flip condition 2");
                     return false;
                 }
             }
@@ -235,13 +222,13 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
             // do it at the end as this is likely not an impact on
             // performance
             //
-            // incident_mesh.positions.remove((edge[0] + 0) as usize);
-            // incident_mesh.positions.remove((edge[0] + 0) as usize);
-            // incident_mesh.positions.remove((edge[0] + 0) as usize);
-            //
-            // incident_mesh.positions.remove((edge[1] + 0) as usize);
-            // incident_mesh.positions.remove((edge[1] + 0) as usize);
-            // incident_mesh.positions.remove((edge[1] + 0) as usize);
+            // // incident_mesh.positions.remove((edge[0] + 0) as usize);
+            // // incident_mesh.positions.remove((edge[0] + 0) as usize);
+            // // incident_mesh.positions.remove((edge[0] + 0) as usize);
+            // //
+            // // incident_mesh.positions.remove((edge[1] + 0) as usize);
+            // // incident_mesh.positions.remove((edge[1] + 0) as usize);
+            // // incident_mesh.positions.remove((edge[1] + 0) as usize);
 
             let new_idx = incident_mesh.positions.len() / 3;
             incident_mesh.positions.push(midpoint[0]);
@@ -254,13 +241,14 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
                     *idx = new_idx as u32;
                 }
 
-                //                 if *idx > edge[0] {
-                //                     *idx -= 1;
-                //                 }
-                //
-                //                 if *idx > edge[1] {
-                //                     *idx -= 1;
-                //                 }
+                // see "// -TEMP simplify run at..."
+                // //                 if *idx > edge[0] {
+                // //                     *idx -= 1;
+                // //                 }
+                // //
+                // //                 if *idx > edge[1] {
+                // //                     *idx -= 1;
+                // //                 }
             }
 
             let mut removals = Vec::with_capacity(2);
@@ -287,7 +275,7 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
         if collapsible.is_empty() {
             println!("positions: {}", incident_mesh.positions.len());
             println!("indices: {}", incident_mesh.indices.len());
-            panic!("This mesh cannot be simplified");
+            panic!("This mesh cannot be simplified (no collapsibles)");
         }
 
         let mut idx = 0;
@@ -297,7 +285,9 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
             if idx == collapsible.len() {
                 println!("positions: {}", incident_mesh.positions.len());
                 println!("indices: {}", incident_mesh.indices.len());
-                println!("This mesh cannot be simplified further");
+                println!(
+                    "This mesh cannot be simplified further (no edge passed collapsible test)"
+                );
                 // panic!("This mesh cannot be simplified");
                 return incident_mesh;
                 // panic!("not further collapsible");
@@ -305,7 +295,7 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
         }
         let collapsed = collapsible[idx].1;
 
-        println!("collapsed: {:?}", collapsed);
+        // println!("collapsed: {:?}", collapsed);
         let new_point = collapse(&collapsed, &mut incident_mesh);
 
         // sanity check
@@ -578,10 +568,10 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
         };
 
         // break;
-        // TODO write tests to validate the patching of all data structures by regenerating them and then comparing them to the regenerated versions
+        // -TODO write tests to validate the patching of all data structures by regenerating them and then comparing them to the regenerated versions
         // TODO make this a traditional rust test, so I can use the testing framework
         // ?DEBUG TEST
-        {
+        if TESTING {
             let write_file = File::create("./logs/log").unwrap();
             let mut writer = BufWriter::new(&write_file);
 
@@ -610,24 +600,27 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
                     compare_vecs_w_order(&t_incident_mesh.positions, &incident_mesh.positions);
 
                 if !mesh_indices {
-                    write!(writer, "mesh_indices_t: \n{:?} \n", t_incident_mesh.indices);
+                    write!(writer, "mesh_indices_t: \n{:?} \n", t_incident_mesh.indices).unwrap();
                     write!(
                         writer,
                         "mesh_indices_o: \n{:?} \n\n\n\n\n",
                         incident_mesh.indices
-                    );
+                    )
+                    .unwrap();
                 }
                 if !mesh_positions {
                     write!(
                         writer,
                         "mesh_positions_t: \n{:?} \n\n\n\n\n",
                         t_incident_mesh.positions
-                    );
+                    )
+                    .unwrap();
                     write!(
                         writer,
                         "mesh_positions_o: \n{:?} \n\n\n\n\n",
                         incident_mesh.positions
-                    );
+                    )
+                    .unwrap();
                 }
             };
 
@@ -658,8 +651,8 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
                     let mut o = vertices.iter().collect::<Vec<(&u32, &Vec<u32>)>>();
                     o.sort();
 
-                    write!(writer, "vertices_t: \n{:?} \n", t);
-                    write!(writer, "vertices_o: \n{:?} \n\n\n\n\n", o);
+                    write!(writer, "vertices_t: \n{:?} \n", t).unwrap();
+                    write!(writer, "vertices_o: \n{:?} \n\n\n\n\n", o).unwrap();
                 }
             };
 
@@ -668,8 +661,8 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
                 tris_set = t_tris == tris;
 
                 if !tris_set {
-                    write!(writer, "tris_t: \n{:?} \n", t_tris);
-                    write!(writer, "tris_o: \n{:?} \n\n\n\n\n", tris);
+                    write!(writer, "tris_t: \n{:?} \n", t_tris).unwrap();
+                    write!(writer, "tris_o: \n{:?} \n\n\n\n\n", tris).unwrap();
                 }
             };
 
@@ -704,8 +697,8 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
                     let mut o = edges.iter().collect::<Vec<(&Edge, &Edge)>>();
                     o.sort();
 
-                    write!(writer, "edges_map_t: \n{:?} \n", t);
-                    write!(writer, "edges_map_o: \n{:?} \n\n\n\n\n", o);
+                    write!(writer, "edges_map_t: \n{:?} \n", t).unwrap();
+                    write!(writer, "edges_map_o: \n{:?} \n\n\n\n\n", o).unwrap();
                 }
             };
 
@@ -742,8 +735,8 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
                     let mut o = collapsible.clone();
                     o.sort_by(compare);
 
-                    write!(writer, "collapsible_vec_t: \n{:?} \n", t);
-                    write!(writer, "collapsible_vec_o: \n{:?} \n\n\n\n\n", o);
+                    write!(writer, "collapsible_vec_t: \n{:?} \n", t).unwrap();
+                    write!(writer, "collapsible_vec_o: \n{:?} \n\n\n\n\n", o).unwrap();
                 }
             };
 
@@ -799,8 +792,8 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
                         e.1.sort();
                     }
 
-                    write!(writer, "tri_dict_t: \n{:?} \n", t);
-                    write!(writer, "tri_dict_o: \n{:?} \n\n\n\n\n", o);
+                    write!(writer, "tri_dict_t: \n{:?} \n", t).unwrap();
+                    write!(writer, "tri_dict_o: \n{:?} \n\n\n\n\n", o).unwrap();
                 }
             };
 
@@ -834,22 +827,22 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
 }
 
 pub fn generate_data_structures(
-    tri_count: &usize,
     indices: &Vec<u32>,
 ) -> (
     HashMap<Edge, [u32; 2]>,
     HashSet<Triangle>,
     HashMap<u32, Vec<u32>>,
 ) {
+    let tri_count = indices.len() / 3;
     let mut edges = HashMap::<Edge, [u32; 2]>::with_capacity(tri_count * 24);
-    let mut tris = HashSet::<Triangle>::with_capacity(*tri_count);
+    let mut tris = HashSet::<Triangle>::with_capacity(tri_count);
     let mut vertices: HashMap<u32, Vec<u32>> = HashMap::new();
 
     // SECTION - Fill vertices, tris, edges and boundary edges
     {
         // * fill vertices, tris and edges
         let mut idx = 0;
-        for _ in 0..*tri_count {
+        for _ in 0..tri_count {
             let idx0 = indices[idx + 0];
             let idx1 = indices[idx + 1];
             let idx2 = indices[idx + 2];
@@ -983,7 +976,7 @@ pub fn new_edge(a: u32, b: u32) -> Edge {
     }
 }
 
-pub fn write_mesh_to_file(name: &str, positions: &Vec<f32>, mesh: &Vec<u32>) {
+pub fn write_mesh_to_file(name: &str, positions: &Vec<f32>, indices: &Vec<u32>) {
     let mut f = File::create(name.to_string() + ".obj").unwrap();
     f.write_all(b"mtllib bunny.mtl\no bun_zipper\n").unwrap();
     for v_idx in (0..positions.len()).step_by(3) {
@@ -1001,13 +994,13 @@ pub fn write_mesh_to_file(name: &str, positions: &Vec<f32>, mesh: &Vec<u32>) {
     f.write_all(b"usemtl None\ns off\n").unwrap();
 
     f.write_all(format!("o {}\n", name).as_bytes()).unwrap();
-    for idx in (0..mesh.len()).step_by(3) {
+    for idx in (0..indices.len()).step_by(3) {
         f.write_all(
             format!(
                 "f {} {} {}\n",
-                mesh[idx + 0] + 1,
-                mesh[idx + 1] + 1,
-                mesh[idx + 2] + 1
+                indices[idx + 0] + 1,
+                indices[idx + 1] + 1,
+                indices[idx + 2] + 1
             )
             .as_bytes(),
         )
@@ -1077,24 +1070,24 @@ pub fn simplify_indices_positions(
 }
 
 impl Mesh {
-    fn sqr_dist(&self, a: u32, b: u32) -> f32 {
+    pub fn sqr_dist(&self, a: u32, b: u32) -> f32 {
         let p1 = &self.positions[(a * 3) as usize..(a * 3 + 3) as usize];
         let p2 = &self.positions[(b * 3) as usize..(b * 3 + 3) as usize];
 
         f32::sqrt((p1[0] - p2[0]).powf(2.0) + (p1[1] - p2[1]).powf(2.0) + (p1[2] - p2[2]).powf(2.0))
     }
 
-    fn sqr_dist_w_custom(&self, a: u32, b: Point) -> f32 {
+    pub fn sqr_dist_w_custom(&self, a: u32, b: Point) -> f32 {
         let p1 = &self.positions[(a * 3) as usize..(a * 3 + 3) as usize];
 
         f32::sqrt((p1[0] - b[0]).powf(2.0) + (p1[1] - b[1]).powf(2.0) + (p1[2] - b[2]).powf(2.0))
     }
 
-    fn sqr_dist_w_2custom(a: Point, b: Point) -> f32 {
+    pub fn sqr_dist_w_2custom(&self, a: Point, b: Point) -> f32 {
         f32::sqrt((a[0] - b[0]).powf(2.0) + (a[1] - b[1]).powf(2.0) + (a[2] - b[2]).powf(2.0))
     }
 
-    fn mid_point_2(&self, a: u32, b: u32) -> Point {
+    pub fn mid_point_2(&self, a: u32, b: u32) -> Point {
         let p1 = &self.positions[(a * 3) as usize..(a * 3 + 3) as usize];
         let p2 = &self.positions[(b * 3) as usize..(b * 3 + 3) as usize];
 
@@ -1105,7 +1098,7 @@ impl Mesh {
         ]
     }
 
-    fn mid_point_3(&self, a: u32, b: u32, c: u32) -> Point {
+    pub fn mid_point_3(&self, a: u32, b: u32, c: u32) -> Point {
         let p1 = &self.positions[(a * 3) as usize..(a * 3 + 3) as usize];
         let p2 = &self.positions[(b * 3) as usize..(b * 3 + 3) as usize];
         let p3 = &self.positions[(c * 3) as usize..(c * 3 + 3) as usize];
@@ -1117,11 +1110,35 @@ impl Mesh {
         ]
     }
 
-    fn mid_point_2custom(a: Point, b: Point) -> Point {
+    pub fn mid_point_2custom(a: Point, b: Point) -> Point {
         [
             (a[0] + b[0]) * 0.5,
             (a[1] + b[1]) * 0.5,
             (a[2] + b[2]) * 0.5,
+        ]
+    }
+
+    pub fn calculate_anchor(&self) -> [f32; 3] {
+        let mut sum: Point = [0.0, 0.0, 0.0];
+
+        for idx in (0..self.indices.len()).step_by(3) {
+            // TODO make this a vectorized op using a math library
+            let center = self.mid_point_3(
+                self.indices[idx + 0],
+                self.indices[idx + 1],
+                self.indices[idx + 2],
+            );
+            // TODO make this a vectorized op using a math library
+            sum[0] += center[0];
+            sum[1] += center[1];
+            sum[2] += center[2];
+        }
+
+        // TODO make this a vectorized op using a math library
+        [
+            sum[0] / ((self.indices.len() / 3) as f32),
+            sum[1] / ((self.indices.len() / 3) as f32),
+            sum[2] / ((self.indices.len() / 3) as f32),
         ]
     }
 }
