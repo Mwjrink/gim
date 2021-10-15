@@ -1,0 +1,1 @@
+$Env:RUST_BACKTRACE=1

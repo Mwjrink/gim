@@ -8,6 +8,7 @@ edition = "2018"
 
 [dependencies]
 tobj = "2.0.2"
+rand = "0.8.4"
 
 # TODO
 # obj => mesh image

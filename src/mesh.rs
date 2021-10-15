@@ -11,8 +11,14 @@ pub type Point = [f32; 3];
 
 const TESTING: bool = false;
 
+#[derive(Clone)]
 pub struct Mesh {
     pub positions: Vec<f32>,
+    pub indices: Vec<u32>,
+}
+
+#[derive(Clone)]
+pub struct TempMesh {
     pub indices: Vec<u32>,
 }
 
@@ -25,7 +31,7 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
 
         let (edges, tris, vertices) = generate_data_structures(&incident_mesh.indices);
 
-        // !Every cluster has their own list of positions
+        // Every cluster has their own list of positions
 
         let mut edge_verts = HashSet::<u32>::new();
         for edge in &edges {
@@ -1069,6 +1075,94 @@ pub fn simplify_indices_positions(
     (mesh_indices, mesh_positions)
 }
 
+pub fn find_equivalent(
+    positions_old: &Vec<f32>,
+    positions_new: &Vec<f32>,
+    idx: &u32,
+) -> Option<u32> {
+    let x = positions_old[*idx as usize + 0];
+    let y = positions_old[*idx as usize + 1];
+    let z = positions_old[*idx as usize + 2];
+
+    for idx in (0..positions_new.len()).step_by(3) {
+        if x == positions_new[idx + 0] && //// formatting
+           y == positions_new[idx + 1] && //// formatting
+           z == positions_new[idx + 2]
+        {
+            return Some(idx as u32);
+        }
+    }
+
+    None
+}
+
+pub fn simplify_indices_positions_cut(
+    indices: &Vec<u32>,
+    positions: &Vec<f32>,
+    cut: &HashSet<Edge>,
+) -> (Vec<u32>, Vec<f32>, HashSet<Edge>) {
+    let mut mesh_positions = Vec::new();
+    let mut mesh_indices = Vec::new();
+    let mut mesh_cut = HashSet::new();
+    {
+        let mut existing = HashMap::new();
+        let mut idx: u32 = 0;
+        for i in indices {
+            if let Some(value) = existing.get(i) {
+                mesh_indices.push(*value);
+            } else {
+                existing.insert(i, idx);
+                mesh_indices.push(idx);
+
+                mesh_positions.push(positions[*i as usize * 3 + 0]);
+                mesh_positions.push(positions[*i as usize * 3 + 1]);
+                mesh_positions.push(positions[*i as usize * 3 + 2]);
+
+                idx += 1;
+            }
+        }
+
+        for edge in cut {
+            mesh_cut.insert(new_edge(
+                *existing.get(&edge[0]).unwrap(),
+                *existing.get(&edge[1]).unwrap(),
+            ));
+        }
+    };
+
+    // DEBUG VALIDATION NOT FOR CUT THOUGH
+    //     {
+    //         for i in 0..indices.len() {
+    //             let oidx = indices[i];
+    //             let nidx = mesh_indices[i];
+    //             println!(
+    //                 "{}:[{}, {}, {}] => {}:[{}, {}, {}]",
+    //                 oidx,
+    //                 positions[oidx as usize],
+    //                 positions[oidx as usize + 1],
+    //                 positions[oidx as usize + 2],
+    //                 nidx,
+    //                 mesh_positions[nidx as usize],
+    //                 mesh_positions[nidx as usize + 1],
+    //                 mesh_positions[nidx as usize + 2]
+    //             );
+    //
+    //             if mesh_positions[nidx as usize] != positions[oidx as usize]
+    //                 || mesh_positions[nidx as usize + 1] != positions[oidx as usize + 1]
+    //                 || mesh_positions[nidx as usize + 2] != positions[oidx as usize + 2]
+    //             {
+    //                 panic!("indices and position simplification failed!");
+    //             }
+    //
+    //             if i % 3 == 0 {
+    //                 println!("");
+    //             }
+    //         }
+    //     }
+
+    (mesh_indices, mesh_positions, mesh_cut)
+}
+
 impl Mesh {
     pub fn sqr_dist(&self, a: u32, b: u32) -> f32 {
         let p1 = &self.positions[(a * 3) as usize..(a * 3 + 3) as usize];
@@ -1124,6 +1218,81 @@ impl Mesh {
         for idx in (0..self.indices.len()).step_by(3) {
             // TODO make this a vectorized op using a math library
             let center = self.mid_point_3(
+                self.indices[idx + 0],
+                self.indices[idx + 1],
+                self.indices[idx + 2],
+            );
+            // TODO make this a vectorized op using a math library
+            sum[0] += center[0];
+            sum[1] += center[1];
+            sum[2] += center[2];
+        }
+
+        // TODO make this a vectorized op using a math library
+        [
+            sum[0] / ((self.indices.len() / 3) as f32),
+            sum[1] / ((self.indices.len() / 3) as f32),
+            sum[2] / ((self.indices.len() / 3) as f32),
+        ]
+    }
+}
+
+pub fn sqr_dist(positions: &Vec<f32>, a: u32, b: u32) -> f32 {
+    let p1 = &positions[(a * 3) as usize..(a * 3 + 3) as usize];
+    let p2 = &positions[(b * 3) as usize..(b * 3 + 3) as usize];
+
+    f32::sqrt((p1[0] - p2[0]).powf(2.0) + (p1[1] - p2[1]).powf(2.0) + (p1[2] - p2[2]).powf(2.0))
+}
+
+pub fn sqr_dist_w_custom(positions: &Vec<f32>, a: u32, b: Point) -> f32 {
+    let p1 = &positions[(a * 3) as usize..(a * 3 + 3) as usize];
+
+    f32::sqrt((p1[0] - b[0]).powf(2.0) + (p1[1] - b[1]).powf(2.0) + (p1[2] - b[2]).powf(2.0))
+}
+
+pub fn sqr_dist_w_2custom(a: Point, b: Point) -> f32 {
+    f32::sqrt((a[0] - b[0]).powf(2.0) + (a[1] - b[1]).powf(2.0) + (a[2] - b[2]).powf(2.0))
+}
+
+pub fn mid_point_2(positions: &Vec<f32>, a: u32, b: u32) -> Point {
+    let p1 = &positions[(a * 3) as usize..(a * 3 + 3) as usize];
+    let p2 = &positions[(b * 3) as usize..(b * 3 + 3) as usize];
+
+    [
+        (p1[0] + p2[0]) * 0.5,
+        (p1[1] + p2[1]) * 0.5,
+        (p1[2] + p2[2]) * 0.5,
+    ]
+}
+
+pub fn mid_point_3(positions: &Vec<f32>, a: u32, b: u32, c: u32) -> Point {
+    let p1 = &positions[(a * 3) as usize..(a * 3 + 3) as usize];
+    let p2 = &positions[(b * 3) as usize..(b * 3 + 3) as usize];
+    let p3 = &positions[(c * 3) as usize..(c * 3 + 3) as usize];
+
+    [
+        (p1[0] + p2[0] + p3[0]) / 3.0,
+        (p1[1] + p2[1] + p3[1]) / 3.0,
+        (p1[2] + p2[2] + p3[2]) / 3.0,
+    ]
+}
+
+pub fn mid_point_2custom(a: Point, b: Point) -> Point {
+    [
+        (a[0] + b[0]) * 0.5,
+        (a[1] + b[1]) * 0.5,
+        (a[2] + b[2]) * 0.5,
+    ]
+}
+
+impl TempMesh {
+    pub fn calculate_anchor(&self, positions: &Vec<f32>) -> [f32; 3] {
+        let mut sum: Point = [0.0, 0.0, 0.0];
+
+        for idx in (0..self.indices.len()).step_by(3) {
+            // TODO make this a vectorized op using a math library
+            let center = mid_point_3(
+                &positions,
                 self.indices[idx + 0],
                 self.indices[idx + 1],
                 self.indices[idx + 2],
