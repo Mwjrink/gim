@@ -1,6 +1,7 @@
 // create clusters of 128 triangles
 // choose a seed triangle, choose the next vertex corresponding to an edge that is closest to the seed triangle
 
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::{fs::File, io::prelude::*};
 
@@ -44,10 +45,14 @@ pub fn write(mesh: &Mesh) -> CTree {
         let mut clusters: Vec<u32> = (0..ctree.len() as u32).collect();
         let mut shared_edges: Vec<SharedEdges> = shared_edges
             .into_iter()
-            .map(|v| SharedEdges {
-                id: v.0,
-                lod: 0,
-                connections: v.1,
+            .map(|v| {
+                let mut connections = v.1;
+                connections.sort_by(|a, b| b.1.cmp(&a.1));
+                SharedEdges {
+                    id: v.0,
+                    lod: 0,
+                    connections,
+                }
             })
             .collect();
 
@@ -57,27 +62,39 @@ pub fn write(mesh: &Mesh) -> CTree {
             // ^ this is where the multivariate optimization problem comes into play
             // grab the highest value of sum_of_two_highest_shared_edges and grab the highest index that is in both of the other connecting vecs
             shared_edges.sort_by(|element1, element2| {
-                let val1 = {
-                    let first = element1.connections.get(0);
-                    let second = element1.connections.get(1);
-                    if first == None || second == None {
-                        i32::MIN
-                    } else {
-                        first.unwrap().1 + second.unwrap().1
-                    }
-                };
+                let cmp = element1.lod.cmp(&element2.lod);
 
-                let val2 = {
-                    let first = element2.connections.get(0);
-                    let second = element2.connections.get(1);
-                    if first == None || second == None {
-                        i32::MIN
-                    } else {
-                        first.unwrap().1 + second.unwrap().1
-                    }
-                };
+                // ensure connections is sorted
+                if cmp == Ordering::Equal {
+                    return element1
+                        .connections
+                        .get(0)
+                        .cmp(&element2.connections.get(0));
+                }
 
-                val1.cmp(&val2)
+                cmp
+
+                //                 let val1 = {
+                //                     let first = element1.connections.get(0);
+                //                     let second = element1.connections.get(1);
+                //                     if first == None || second == None {
+                //                         i32::MIN
+                //                     } else {
+                //                         first.unwrap().1 + second.unwrap().1
+                //                     }
+                //                 };
+                //
+                //                 let val2 = {
+                //                     let first = element2.connections.get(0);
+                //                     let second = element2.connections.get(1);
+                //                     if first == None || second == None {
+                //                         i32::MIN
+                //                     } else {
+                //                         first.unwrap().1 + second.unwrap().1
+                //                     }
+                //                 };
+                //
+                //                 val1.cmp(&val2)
             });
 
             if shared_edges.is_empty() {
@@ -90,144 +107,134 @@ pub fn write(mesh: &Mesh) -> CTree {
             // ? TODO determine if any clusters are abandoned by combining these, include that one, ie ring abandons tip of ear on bunny
             // ? Is this, ^, actually an issue? it will just get picked up by a later cluster, it would be unoptimal but it wouldn't happen very often at all
 
-            let mut last_idx = shared_edges.len() - 1;
-            let (
-                share0,
-                cluster0_index,
-                share1,
-                cluster1_index,
-                share2,
-                cluster2_index,
-                share3,
-                cluster3_index,
-            ) = loop {
-                let share0 = (shared_edges[last_idx].id, 0);
-                let cluster0_index = shared_edges.len() - 1;
+            // get the cluster with the largest adjacency, add all the adjacents to a HashMap<u32, u32>
+            // choose the highest value, choose it as the next cluster, add all the adjacents of that
+            // cluster to the HashMap, if the value exists just add the values together. continue until
+            // you have 4 values
+            
+            let mut adjacency_map = HashMap::new();
 
-                // let starting_point = shared_edges.last().unwrap();
-                let share1 = shared_edges.last().unwrap().connections[0];
-                // dont unwrap, if none, remove from list
-                let cluster1_index = shared_edges
-                    .iter()
-                    .position(|value| value.id == share1.0)
-                    .unwrap();
+            // TODO the clusters are not adjacent, they are not connected
+            let cluster0_id = shared_edges.last().unwrap().id;
+            let cluster0_idx = shared_edges.len() - 1;
+            let cluster0 = shared_edges.last().unwrap();
+            for adj in &cluster0.connections {
+                adjacency_map.insert(adj.0, adj.1);
+            }
 
-                // TODO could also try a high combo with this share0 just not with the first 2?
-                let share2 = shared_edges.last().unwrap().connections[1];
-                let cluster2_index = shared_edges
-                    .iter()
-                    .position(|value| value.id == share2.0)
-                    .unwrap();
-
-                let mut highest_combo = (None, 0);
-                for connection1 in &shared_edges[cluster1_index].connections {
-                    if connection1.0 != share0.0
-                        && connection1.0 != shared_edges[cluster1_index].id
-                        && connection1.0 != shared_edges[cluster2_index].id
-                    {
-                        for connection2 in &shared_edges[cluster2_index].connections {
-                            // if connection2.0 != share0.0
-                            //     && connection2.0 != shared_edges[cluster1_index].id
-                            //     && connection2.0 != shared_edges[cluster2_index].id
-                            // {
-                            if connection1.0 == connection2.0 {
-                                let shared = connection1.1 + connection2.1;
-                                if shared > highest_combo.1 {
-                                    highest_combo = (Some(connection1.0), shared);
-                                }
-                            }
-                            // }
-                        }
-                    }
+            let cluster1_id = cluster0.connections.get(0).unwrap().0;
+            let cluster1_idx = shared_edges
+                .iter()
+                .position(|e| e.id == cluster1_id)
+                .unwrap();
+            let cluster1 = shared_edges.get(cluster1_idx).unwrap();
+            for adj in &cluster1.connections {
+                let old = adjacency_map.insert(adj.0, adj.1);
+                if let Some(value) = old {
+                    *adjacency_map.get_mut(&adj.0).unwrap() += value;
                 }
+            }
 
-                if let Some(idx3) = highest_combo.0 {
-                    let share3 = (idx3, highest_combo);
-                    // println!("share3: {}", share3.0);
-                    // println!("shared_edges: {:?}", shared_edges);
-                    // println!();
-                    let cluster3_index = shared_edges
-                        .iter()
-                        .position(|value| value.id == share3.0)
-                        .unwrap();
+            let mut adjacency_vec: Vec<(u32, i32)> =
+                adjacency_map.iter().map(|v| (*v.0, *v.1)).collect();
+            adjacency_vec.sort_by(|a, b| a.1.cmp(&b.1));
 
-                    break (
-                        share0,
-                        cluster0_index,
-                        share1,
-                        cluster1_index,
-                        share2,
-                        cluster2_index,
-                        share3,
-                        cluster3_index,
-                    );
-                } else {
-                    if last_idx == 0 {
-                        panic!("cannot find a mergeable cluster?");
-                    }
-
-                    last_idx -= 1;
+            let mut cluster2_id = u32::MAX;
+            for adj in adjacency_vec.iter().rev() {
+                if adj.0 != cluster0_id && adj.0 != cluster1_id {
+                    cluster2_id = adj.0;
+                    break;
                 }
-            };
+            }
+
+            let cluster2_idx = shared_edges
+                .iter()
+                .position(|e| e.id == cluster2_id)
+                .unwrap();
+            let cluster2 = shared_edges.get(cluster2_idx).unwrap();
+            for adj in &cluster2.connections {
+                let old = adjacency_map.insert(adj.0, adj.1);
+                if let Some(value) = old {
+                    *adjacency_map.get_mut(&adj.0).unwrap() += value;
+                }
+            }
+
+            let mut adjacency_vec: Vec<(u32, i32)> =
+                adjacency_map.iter().map(|v| (*v.0, *v.1)).collect();
+            adjacency_vec.sort_by(|a, b| a.1.cmp(&b.1));
+
+            let mut cluster3_id = u32::MAX;
+            for adj in adjacency_vec.iter().rev() {
+                if adj.0 != cluster0_id && adj.0 != cluster1_id && adj.0 != cluster2_id {
+                    cluster3_id = adj.0;
+                    break;
+                }
+            }
+            let cluster3_idx = shared_edges
+                .iter()
+                .position(|e| e.id == cluster3_id)
+                .unwrap();
+            let cluster3 = shared_edges.get(cluster3_idx).unwrap();
+            // };
 
             // TODO new algorithm for choosing what to merge
             // sort the list by lod level with the a + b as a tie breaker?
 
             // combine the clusters into one mesh
             // let mut triangles = Vec::<Triangle>::with_capacity(
-            //     clusters[share0.0].tris.len()
-            //         + clusters[share1.0].tris.len()
-            //         + clusters[share2.0].tris.len()
-            //         + clusters[share3.0].tris.len(),
+            //     clusters[cluster0_id].tris.len()
+            //         + clusters[cluster1_id].tris.len()
+            //         + clusters[cluster2_id].tris.len()
+            //         + clusters[cluster3_id].tris.len(),
             // );
-            // triangles.extend_from_slice(&clusters[share0.0].tris);
-            // triangles.extend_from_slice(&clusters[share1.0].tris);
-            // triangles.extend_from_slice(&clusters[share2.0].tris);
-            // triangles.extend_from_slice(&clusters[share3.0].tris);
+            // triangles.extend_from_slice(&clusters[cluster0_id].tris);
+            // triangles.extend_from_slice(&clusters[cluster1_id].tris);
+            // triangles.extend_from_slice(&clusters[cluster2_id].tris);
+            // triangles.extend_from_slice(&clusters[cluster3_id].tris);
 
-            // idx += clusters[share3.0].positions.len();
+            // idx += clusters[cluster3_id].positions.len();
 
             // let border = clusters[starting_point.id].cut
-            //     .symmetric_difference(&clusters[share1.0].cut).map(|value| { value.clone() }).collect::<HashSet<[u32; 2]>>()
-            //     .symmetric_difference(&clusters[share2.0].cut).map(|value| { value.clone() }).collect::<HashSet<[u32; 2]>>()
-            //     .symmetric_difference(&clusters[share3.0].cut).map(|value| { value.clone() }).collect::<HashSet<[u32; 2]>>();
+            //     .symmetric_difference(&clusters[cluster1_id].cut).map(|value| { value.clone() }).collect::<HashSet<[u32; 2]>>()
+            //     .symmetric_difference(&clusters[cluster2_id].cut).map(|value| { value.clone() }).collect::<HashSet<[u32; 2]>>()
+            //     .symmetric_difference(&clusters[cluster3_id].cut).map(|value| { value.clone() }).collect::<HashSet<[u32; 2]>>();
 
             let (mesh_indices, mesh_positions) = {
                 let mut indices = Vec::with_capacity(
-                    ctree.get(&share0.0).mesh.indices.len()
-                        + ctree.get(&share1.0).mesh.indices.len()
-                        + ctree.get(&share2.0).mesh.indices.len()
-                        + ctree.get(&share3.0).mesh.indices.len(),
+                    ctree.get(&cluster0_id).mesh.indices.len()
+                        + ctree.get(&cluster1_id).mesh.indices.len()
+                        + ctree.get(&cluster2_id).mesh.indices.len()
+                        + ctree.get(&cluster3_id).mesh.indices.len(),
                 );
 
                 let mut positions = Vec::with_capacity(
-                    ctree.get(&share0.0).mesh.positions.len()
-                        + ctree.get(&share1.0).mesh.positions.len()
-                        + ctree.get(&share2.0).mesh.positions.len()
-                        + ctree.get(&share3.0).mesh.positions.len(),
+                    ctree.get(&cluster0_id).mesh.positions.len()
+                        + ctree.get(&cluster1_id).mesh.positions.len()
+                        + ctree.get(&cluster2_id).mesh.positions.len()
+                        + ctree.get(&cluster3_id).mesh.positions.len(),
                 );
 
-                // might be faster with a .extend_from_slice(clusters[share0.0].indices.map(|a| { a + idx })) etc
+                // might be faster with a .extend_from_slice(clusters[cluster0_id].indices.map(|a| { a + idx })) etc
                 let mut idx = 0;
-                for i in &ctree.get(&share0.0).mesh.indices {
+                for i in &ctree.get(&cluster0_id).mesh.indices {
                     indices.push(i + idx);
                 }
-                positions.extend_from_slice(&ctree.get(&share0.0).mesh.positions);
-                idx += ctree.get(&share0.0).mesh.positions.len() as u32 / 3;
-                for i in &ctree.get(&share1.0).mesh.indices {
+                positions.extend_from_slice(&ctree.get(&cluster0_id).mesh.positions);
+                idx += ctree.get(&cluster0_id).mesh.positions.len() as u32 / 3;
+                for i in &ctree.get(&cluster1_id).mesh.indices {
                     indices.push(i + idx);
                 }
-                positions.extend_from_slice(&ctree.get(&share1.0).mesh.positions);
-                idx += ctree.get(&share1.0).mesh.positions.len() as u32 / 3;
-                for i in &ctree.get(&share2.0).mesh.indices {
+                positions.extend_from_slice(&ctree.get(&cluster1_id).mesh.positions);
+                idx += ctree.get(&cluster1_id).mesh.positions.len() as u32 / 3;
+                for i in &ctree.get(&cluster2_id).mesh.indices {
                     indices.push(i + idx);
                 }
-                positions.extend_from_slice(&ctree.get(&share2.0).mesh.positions);
-                idx += ctree.get(&share2.0).mesh.positions.len() as u32 / 3;
-                for i in &ctree.get(&share3.0).mesh.indices {
+                positions.extend_from_slice(&ctree.get(&cluster2_id).mesh.positions);
+                idx += ctree.get(&cluster2_id).mesh.positions.len() as u32 / 3;
+                for i in &ctree.get(&cluster3_id).mesh.indices {
                     indices.push(i + idx);
                 }
-                positions.extend_from_slice(&ctree.get(&share3.0).mesh.positions);
+                positions.extend_from_slice(&ctree.get(&cluster3_id).mesh.positions);
 
                 simplify_indices_positions(&indices, &positions)
             };
@@ -260,30 +267,30 @@ pub fn write(mesh: &Mesh) -> CTree {
             // );
             // println!(
             //     "writing cluster2 with {} tris",
-            //     clusters[share1.0].tris.len()
+            //     clusters[cluster1_id].tris.len()
             // );
             // write_mesh_to_file(
             //     "cluster2",
             //     &mesh.positions,
-            //     &clusters[share1.0].tris.iter().flatten().cloned().collect(),
+            //     &clusters[cluster1_id].tris.iter().flatten().cloned().collect(),
             // );
             // println!(
             //     "writing cluster3 with {} tris",
-            //     clusters[share2.0].tris.len()
+            //     clusters[cluster2_id].tris.len()
             // );
             // write_mesh_to_file(
             //     "cluster3",
             //     &mesh.positions,
-            //     &clusters[share2.0].tris.iter().flatten().cloned().collect(),
+            //     &clusters[cluster2_id].tris.iter().flatten().cloned().collect(),
             // );
             // println!(
             //     "writing cluster4 with {} tris",
-            //     clusters[share3.0].tris.len()
+            //     clusters[cluster3_id].tris.len()
             // );
             // write_mesh_to_file(
             //     "cluster4",
             //     &mesh.positions,
-            //     &clusters[share3.0].tris.iter().flatten().cloned().collect(),
+            //     &clusters[cluster3_id].tris.iter().flatten().cloned().collect(),
             // );
             // println!(
             //     "writing new_indices with {} tris",
@@ -487,18 +494,18 @@ pub fn write(mesh: &Mesh) -> CTree {
             let idx1 = ctree.insert(
                 combined1,
                 &[u32::MAX, u32::MAX],
-                &[share0.0, share1.0, share2.0, share3.0],
+                &[cluster0_id, cluster1_id, cluster2_id, cluster3_id],
             );
             clusters.push(idx1);
 
             let idx2 = ctree.insert(
                 combined2,
                 &[u32::MAX, u32::MAX],
-                &[share0.0, share1.0, share2.0, share3.0],
+                &[cluster0_id, cluster1_id, cluster2_id, cluster3_id],
             );
             clusters.push(idx2);
 
-            let removals = vec![share0.0, share1.0, share2.0, share3.0];
+            let removals = vec![cluster0_id, cluster1_id, cluster2_id, cluster3_id];
             let mut remove_idxs: Vec<usize> = (0..clusters.len())
                 .filter(|idx| removals.contains(&clusters[*idx]))
                 .collect();
@@ -507,16 +514,11 @@ pub fn write(mesh: &Mesh) -> CTree {
                 clusters.remove(*r as usize);
             }
 
-            println!("cluster0_index: {}", cluster0_index);
-            println!("cluster1_index: {}", cluster1_index);
-            println!("cluster2_index: {}", cluster2_index);
-            println!("cluster3_index: {}", cluster3_index);
-            let mut remove_idxs = [
-                cluster0_index,
-                cluster1_index,
-                cluster2_index,
-                cluster3_index,
-            ];
+            println!("cluster0_index: {}", cluster0_idx);
+            println!("cluster1_index: {}", cluster1_idx);
+            println!("cluster2_index: {}", cluster2_idx);
+            println!("cluster3_index: {}", cluster3_idx);
+            let mut remove_idxs = [cluster0_idx, cluster1_idx, cluster2_idx, cluster3_idx];
             remove_idxs.sort();
             let mut old_shared = Vec::with_capacity(4);
             for r in remove_idxs.iter().rev() {
@@ -526,7 +528,7 @@ pub fn write(mesh: &Mesh) -> CTree {
             // fix the overlapping edges on the other clusters in the lists
             let (connections1, connections2) = recalculate_shared_edges(
                 &ctree,
-                [share0.0, share1.0, share2.0, share3.0],
+                [cluster0_id, cluster1_id, cluster2_id, cluster3_id],
                 [idx1, idx2],
                 &clusters,
                 &old_shared

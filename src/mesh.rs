@@ -294,6 +294,13 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
                 println!(
                     "This mesh cannot be simplified further (no edge passed collapsible test)"
                 );
+
+                write_mesh_to_file(
+                    "debug_cluster_edge_collapsing",
+                    &incident_mesh.positions,
+                    &incident_mesh.indices,
+                );
+
                 // panic!("This mesh cannot be simplified");
                 return incident_mesh;
                 // panic!("not further collapsible");
