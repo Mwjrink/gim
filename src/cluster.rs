@@ -264,7 +264,7 @@ pub fn split_mesh(mesh: &Mesh, TRIS_IN_CLUSTER: usize) -> (HashMap<u32, Vec<(u32
     let mut shared_edges: HashMap<u32, Vec<(u32, i32)>> = HashMap::new();
     let mut ctree = TempCTree::from_clusters(clusters.clone());
     for id in 0..clusters.len() as u32 {
-        let mut connections = Vec::with_capacity(clusters.len());
+        let mut connections = Vec::with_capacity(10);
         for j in 0..clusters.len() as u32 {
             if id == j {
                 continue;
@@ -275,6 +275,7 @@ pub fn split_mesh(mesh: &Mesh, TRIS_IN_CLUSTER: usize) -> (HashMap<u32, Vec<(u32
                 connections.push((j, count as i32));
             }
         }
+        connections.sort_by(|a, b| b.1.cmp(&a.1));
         shared_edges.insert(id, connections);
 
         // cut_length.push((id, ctree.get(&id).cut.len()));

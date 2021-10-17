@@ -9,7 +9,7 @@ pub type Triangle = [u32; 3];
 pub type Edge = [u32; 2];
 pub type Point = [f32; 3];
 
-const TESTING: bool = false;
+const TESTING: bool = true;
 
 #[derive(Clone)]
 pub struct Mesh {
@@ -281,6 +281,9 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
         if collapsible.is_empty() {
             println!("positions: {}", incident_mesh.positions.len());
             println!("indices: {}", incident_mesh.indices.len());
+
+            write_mesh_to_file("debug_cluster_edge_collapsing", &incident_mesh);
+
             panic!("This mesh cannot be simplified (no collapsibles)");
         }
 
@@ -295,11 +298,7 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
                     "This mesh cannot be simplified further (no edge passed collapsible test)"
                 );
 
-                write_mesh_to_file(
-                    "debug_cluster_edge_collapsing",
-                    &incident_mesh.positions,
-                    &incident_mesh.indices,
-                );
+                write_mesh_to_file("debug_cluster_edge_collapsing", &incident_mesh);
 
                 // panic!("This mesh cannot be simplified");
                 return incident_mesh;
@@ -543,6 +542,7 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
 
         // collapsible
         {
+            // TODO I think I am missing the edges that go from the new point to the vertices shared by the collapsed values
             let mut contained = Vec::new();
             let mut removals = Vec::new();
             let mut idx: usize = 0;
@@ -989,16 +989,16 @@ pub fn new_edge(a: u32, b: u32) -> Edge {
     }
 }
 
-pub fn write_mesh_to_file(name: &str, positions: &Vec<f32>, indices: &Vec<u32>) {
+pub fn write_mesh_to_file(name: &str, mesh: &Mesh) {
     let mut f = File::create(name.to_string() + ".obj").unwrap();
     f.write_all(b"mtllib bunny.mtl\no bun_zipper\n").unwrap();
-    for v_idx in (0..positions.len()).step_by(3) {
+    for v_idx in (0..mesh.positions.len()).step_by(3) {
         f.write_all(
             format!(
                 "v {} {} {}\n",
-                positions[v_idx + 0],
-                positions[v_idx + 1],
-                positions[v_idx + 2]
+                mesh.positions[v_idx + 0],
+                mesh.positions[v_idx + 1],
+                mesh.positions[v_idx + 2]
             )
             .as_bytes(),
         )
@@ -1007,13 +1007,13 @@ pub fn write_mesh_to_file(name: &str, positions: &Vec<f32>, indices: &Vec<u32>) 
     f.write_all(b"usemtl None\ns off\n").unwrap();
 
     f.write_all(format!("o {}\n", name).as_bytes()).unwrap();
-    for idx in (0..indices.len()).step_by(3) {
+    for idx in (0..mesh.indices.len()).step_by(3) {
         f.write_all(
             format!(
                 "f {} {} {}\n",
-                indices[idx + 0] + 1,
-                indices[idx + 1] + 1,
-                indices[idx + 2] + 1
+                mesh.indices[idx + 0] + 1,
+                mesh.indices[idx + 1] + 1,
+                mesh.indices[idx + 2] + 1
             )
             .as_bytes(),
         )
@@ -1080,6 +1080,30 @@ pub fn simplify_indices_positions(
     //     }
 
     (mesh_indices, mesh_positions)
+}
+
+pub fn remove_duplicated_vertices(indices: &mut Vec<u32>, positions: &mut Vec<f32>) {
+    let mut positions_map = HashMap::<String, u32>::new();
+    let mut index_map = HashMap::<u32, u32>::new();
+    for idx in (0..positions.len()).step_by(3) {
+        let key = format!(
+            "[{}, {}, {}]",
+            positions[idx + 0],
+            positions[idx + 1],
+            positions[idx + 2]
+        );
+        if let Some(new_idx) = positions_map.get(&key) {
+            index_map.insert(idx as u32, new_idx.clone());
+            continue;
+        } else {
+            positions_map.insert(key, idx as u32);
+        }
+    }
+
+    // remove the values at the index_map.keys from positions
+    for idx in indices {
+        
+    }
 }
 
 pub fn find_equivalent(

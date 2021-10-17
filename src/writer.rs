@@ -3,6 +3,7 @@
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
+use std::io::{BufWriter, Write};
 use std::{fs::File, io::prelude::*};
 
 use rand::Rng;
@@ -35,6 +36,10 @@ pub fn write(mesh: &Mesh) -> CTree {
 
     let (shared_edges, mut ctree) = split_mesh(&mesh, TRIS_IN_CLUSTER);
 
+    let write_file = File::create("./logs/log").unwrap();
+    let mut writer = BufWriter::new(&write_file);
+    write!(writer, "shared_edges: \n{:?} \n", shared_edges).unwrap();
+
     println!("{} clusters generated", ctree.len());
 
     // panic!();
@@ -46,12 +51,12 @@ pub fn write(mesh: &Mesh) -> CTree {
         let mut shared_edges: Vec<SharedEdges> = shared_edges
             .into_iter()
             .map(|v| {
-                let mut connections = v.1;
-                connections.sort_by(|a, b| b.1.cmp(&a.1));
+                // let mut connections = v.1;
+                // connections.sort_by(|a, b| b.1.cmp(&a.1));
                 SharedEdges {
                     id: v.0,
                     lod: 0,
-                    connections,
+                    connections: v.1,
                 }
             })
             .collect();
@@ -111,7 +116,7 @@ pub fn write(mesh: &Mesh) -> CTree {
             // choose the highest value, choose it as the next cluster, add all the adjacents of that
             // cluster to the HashMap, if the value exists just add the values together. continue until
             // you have 4 values
-            
+
             let mut adjacency_map = HashMap::new();
 
             // TODO the clusters are not adjacent, they are not connected
@@ -177,6 +182,22 @@ pub fn write(mesh: &Mesh) -> CTree {
             let cluster3 = shared_edges.get(cluster3_idx).unwrap();
             // };
 
+            println!("cluster0 id: {}", cluster0_id);
+            println!("cluster0 adjacency: {:?}", cluster0.connections);
+            println!();
+
+            println!("cluster1 id: {}", cluster1_id);
+            println!("cluster1 adjacency: {:?}", cluster1.connections);
+            println!();
+
+            println!("cluster2 id: {}", cluster2_id);
+            println!("cluster2 adjacency: {:?}", cluster2.connections);
+            println!();
+
+            println!("cluster3 id: {}", cluster3_id);
+            println!("cluster3 adjacency: {:?}", cluster3.connections);
+            println!();
+
             // TODO new algorithm for choosing what to merge
             // sort the list by lod level with the a + b as a tie breaker?
 
@@ -236,6 +257,9 @@ pub fn write(mesh: &Mesh) -> CTree {
                 }
                 positions.extend_from_slice(&ctree.get(&cluster3_id).mesh.positions);
 
+                // TODO I have duplicated vertices with different indices in this list because they have their own indices in their index lists
+                remove_duplicated_vertices(&mut indices, &mut positions);
+
                 simplify_indices_positions(&indices, &positions)
             };
 
@@ -249,49 +273,14 @@ pub fn write(mesh: &Mesh) -> CTree {
             // mesh simplification
             let cluster = simplify(&combined, (TRIS_IN_CLUSTER * 2) as u32);
 
-            // println!("writing original with {} indices", indices.len());
-            // write_mesh_to_file("original", &mesh.positions, &indices);
-            // println!(
-            //     "writing cluster1 with {} tris",
-            //     clusters[shared_edges.last().unwrap().id].tris.len()
-            // );
-            // write_mesh_to_file(
-            //     "cluster1",
-            //     &mesh.positions,
-            //     &clusters[shared_edges.last().unwrap().id]
-            //         .tris
-            //         .iter()
-            //         .flatten()
-            //         .cloned()
-            //         .collect(),
-            // );
-            // println!(
-            //     "writing cluster2 with {} tris",
-            //     clusters[cluster1_id].tris.len()
-            // );
-            // write_mesh_to_file(
-            //     "cluster2",
-            //     &mesh.positions,
-            //     &clusters[cluster1_id].tris.iter().flatten().cloned().collect(),
-            // );
-            // println!(
-            //     "writing cluster3 with {} tris",
-            //     clusters[cluster2_id].tris.len()
-            // );
-            // write_mesh_to_file(
-            //     "cluster3",
-            //     &mesh.positions,
-            //     &clusters[cluster2_id].tris.iter().flatten().cloned().collect(),
-            // );
-            // println!(
-            //     "writing cluster4 with {} tris",
-            //     clusters[cluster3_id].tris.len()
-            // );
-            // write_mesh_to_file(
-            //     "cluster4",
-            //     &mesh.positions,
-            //     &clusters[cluster3_id].tris.iter().flatten().cloned().collect(),
-            // );
+            println!("writing cluster0 id: {}", &cluster0_id);
+            write_mesh_to_file("cluster0", &ctree.get(&cluster0.id).mesh);
+            println!("writing cluster1 id: {}", &cluster1_id);
+            write_mesh_to_file("cluster1", &ctree.get(&cluster1.id).mesh);
+            println!("writing cluster2 id: {}", &cluster2_id);
+            write_mesh_to_file("cluster2", &ctree.get(&cluster2.id).mesh);
+            println!("writing cluster3 id: {}", &cluster3_id);
+            write_mesh_to_file("cluster3", &ctree.get(&cluster3.id).mesh);
             // println!(
             //     "writing new_indices with {} tris",
             //     cluster.indices.len() / 3
@@ -514,10 +503,10 @@ pub fn write(mesh: &Mesh) -> CTree {
                 clusters.remove(*r as usize);
             }
 
-            println!("cluster0_index: {}", cluster0_idx);
-            println!("cluster1_index: {}", cluster1_idx);
-            println!("cluster2_index: {}", cluster2_idx);
-            println!("cluster3_index: {}", cluster3_idx);
+            // println!("cluster0_index: {}", cluster0_idx);
+            // println!("cluster1_index: {}", cluster1_idx);
+            // println!("cluster2_index: {}", cluster2_idx);
+            // println!("cluster3_index: {}", cluster3_idx);
             let mut remove_idxs = [cluster0_idx, cluster1_idx, cluster2_idx, cluster3_idx];
             remove_idxs.sort();
             let mut old_shared = Vec::with_capacity(4);
@@ -526,7 +515,7 @@ pub fn write(mesh: &Mesh) -> CTree {
             }
 
             // fix the overlapping edges on the other clusters in the lists
-            let (connections1, connections2) = recalculate_shared_edges(
+            let (mut connections1, mut connections2) = recalculate_shared_edges(
                 &ctree,
                 [cluster0_id, cluster1_id, cluster2_id, cluster3_id],
                 [idx1, idx2],
@@ -540,12 +529,14 @@ pub fn write(mesh: &Mesh) -> CTree {
 
             let mut lod_levels: Vec<u32> = old_shared.iter().map(|e| e.lod).collect();
             lod_levels.sort();
-            let lod = *lod_levels.last().unwrap();
+            let lod = *lod_levels.last().unwrap() + 1;
+            connections1.sort_by(|a, b| b.1.cmp(&a.1));
             shared_edges.push(SharedEdges {
                 id: idx1,
                 lod,
                 connections: connections1,
             });
+            connections2.sort_by(|a, b| b.1.cmp(&a.1));
             shared_edges.push(SharedEdges {
                 id: idx2,
                 lod,
@@ -783,28 +774,29 @@ fn recalculate_shared_edges(
     connections: &Vec<(u32, i32)>,
     shared_edges: &mut Vec<SharedEdges>,
 ) -> (Vec<(u32, i32)>, Vec<(u32, i32)>) {
+    let connections: HashSet<u32> = connections.iter().map(|x| x.0).collect();
     let mut connections1 = Vec::new();
     let mut connections2 = Vec::new();
     for connection in connections {
         // TODO is this right? it can only be on this level?
-        if !clusters.contains(&connection.0) {
+        if !clusters.contains(&connection) {
             continue;
         }
 
         // test first
         {
-            let connected = ctree.get(&connection.0);
+            let connected = ctree.get(&connection);
             let count = ctree.get(&new[0]).cut.intersection(&connected.cut).count();
             if count > 0 {
-                connections1.push((connection.0, count as i32));
+                connections1.push((connection, count as i32));
             }
         };
         // test second
         {
-            let connected = ctree.get(&connection.0);
+            let connected = ctree.get(&connection);
             let count = ctree.get(&new[1]).cut.intersection(&connected.cut).count();
             if count > 0 {
-                connections2.push((connection.0, count as i32));
+                connections2.push((connection, count as i32));
             }
         };
 
