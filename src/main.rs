@@ -25,14 +25,12 @@ fn main() {
 
         // TODO probably bad cause these could be HUGE, do something else, ...
         // TODO... but that may have to wait for a better asset importer or a switch to gltf2 or usda
-        let mesh = Mesh {
+        let mut mesh = Mesh {
             positions: mesh.positions.clone(),
             indices: mesh.indices.clone(),
         };
 
-
-        let _output = gim::writer::write(&mesh);
-
+        let _output = gim::writer::write(&mut mesh);
     }
 
     return ();

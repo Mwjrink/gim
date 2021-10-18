@@ -5,11 +5,11 @@ use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufWriter, Write};
 
+const TESTING: bool = false;
+
 pub type Triangle = [u32; 3];
 pub type Edge = [u32; 2];
 pub type Point = [f32; 3];
-
-const TESTING: bool = true;
 
 #[derive(Clone)]
 pub struct Mesh {
@@ -22,10 +22,15 @@ pub struct TempMesh {
     pub indices: Vec<u32>,
 }
 
-pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
-    let generate_necessary = |mesh: &Mesh| {
-        let incident_mesh = Mesh {
-            positions: mesh.positions.clone(),
+pub fn simplify(
+    mesh: &TempMesh,
+    positions: &mut Vec<f32>,
+    mesh_edge: &HashSet<Edge>,
+    target_tris: u32,
+) -> TempMesh {
+    let generate_necessary = |mesh: &TempMesh, positions: &Vec<f32>| {
+        let incident_mesh = TempMesh {
+            // positions: positions.clone(),
             indices: mesh.indices.clone(),
         };
 
@@ -36,8 +41,10 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
         let mut edge_verts = HashSet::<u32>::new();
         for edge in &edges {
             if edge.1[1] == u32::MAX || edge.1[0] == u32::MAX {
-                edge_verts.insert(edge.0[0]);
-                edge_verts.insert(edge.0[1]);
+                if !mesh_edge.contains(edge.0) {
+                    edge_verts.insert(edge.0[0]);
+                    edge_verts.insert(edge.0[1]);
+                }
             }
         }
 
@@ -46,7 +53,7 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
         let mut collapsible = Vec::<(f32, Edge)>::with_capacity(edges.len());
         for edge in &edges {
             if !edge_verts.contains(&edge.0[0]) && !edge_verts.contains(&edge.0[1]) {
-                collapsible.push((incident_mesh.sqr_dist(edge.0[0], edge.0[1]), *edge.0));
+                collapsible.push((sqr_dist(&positions, edge.0[0], edge.0[1]), *edge.0));
             }
             // else {
             //     println!("rejected: {:?}", *edge.0);
@@ -97,12 +104,11 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
         mut edges,
         mut collapsible,
         mut tri_dict,
-    ) = generate_necessary(mesh);
+    ) = generate_necessary(mesh, positions);
 
-    // if true {
     while incident_mesh.indices.len() > (target_tris * 3) as usize {
         let is_collapsible = |edge: &Edge| {
-            let midpoint = incident_mesh.mid_point_2(edge[0], edge[1]);
+            let midpoint = mid_point_2(positions, edge[0], edge[1]);
             // exactly 2 neigbouring vertices for each element in edge
             let mut a = vertices.get(&edge[0]).unwrap().clone();
             a.sort();
@@ -110,8 +116,8 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
             b.sort();
             let intsxn = sorted_vec_intersection_count(&a, &b);
 
-            if intsxn != 2 {
-                println!("shared verts condition: {}", intsxn);
+            if intsxn > 2 {
+                // println!("shared verts condition: {}", intsxn);
                 return false;
             }
 
@@ -120,22 +126,16 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
             // for every triangle with one of these vertices in it, calculate the cross product of the trangle, then again with the new vert, if the dot product between those two is negative, the triangle was flipped
             for tri in tri_dict.get(&edge[0]).unwrap() {
                 let edge1 = [
-                    incident_mesh.positions[tri[1] as usize * 3 + 0]
-                        - incident_mesh.positions[tri[0] as usize * 3 + 0],
-                    incident_mesh.positions[tri[1] as usize * 3 + 1]
-                        - incident_mesh.positions[tri[0] as usize * 3 + 1],
-                    incident_mesh.positions[tri[1] as usize * 3 + 2]
-                        - incident_mesh.positions[tri[0] as usize * 3 + 2],
+                    positions[tri[1] as usize * 3 + 0] - positions[tri[0] as usize * 3 + 0],
+                    positions[tri[1] as usize * 3 + 1] - positions[tri[0] as usize * 3 + 1],
+                    positions[tri[1] as usize * 3 + 2] - positions[tri[0] as usize * 3 + 2],
                 ];
 
                 let initial = {
                     let edge2 = [
-                        incident_mesh.positions[edge[0] as usize * 3 + 0]
-                            - incident_mesh.positions[tri[0] as usize * 3 + 0],
-                        incident_mesh.positions[edge[0] as usize * 3 + 1]
-                            - incident_mesh.positions[tri[0] as usize * 3 + 1],
-                        incident_mesh.positions[edge[0] as usize * 3 + 2]
-                            - incident_mesh.positions[tri[0] as usize * 3 + 2],
+                        positions[edge[0] as usize * 3 + 0] - positions[tri[0] as usize * 3 + 0],
+                        positions[edge[0] as usize * 3 + 1] - positions[tri[0] as usize * 3 + 1],
+                        positions[edge[0] as usize * 3 + 2] - positions[tri[0] as usize * 3 + 2],
                     ];
 
                     [
@@ -147,9 +147,9 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
 
                 let second = {
                     let edge2 = [
-                        midpoint[0] - incident_mesh.positions[tri[0] as usize * 3 + 0],
-                        midpoint[1] - incident_mesh.positions[tri[0] as usize * 3 + 1],
-                        midpoint[2] - incident_mesh.positions[tri[0] as usize * 3 + 2],
+                        midpoint[0] - positions[tri[0] as usize * 3 + 0],
+                        midpoint[1] - positions[tri[0] as usize * 3 + 1],
+                        midpoint[2] - positions[tri[0] as usize * 3 + 2],
                     ];
 
                     [
@@ -168,22 +168,16 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
 
             for tri in tri_dict.get(&edge[1]).unwrap() {
                 let edge1 = [
-                    incident_mesh.positions[tri[1] as usize * 3 + 0]
-                        - incident_mesh.positions[tri[0] as usize * 3 + 0],
-                    incident_mesh.positions[tri[1] as usize * 3 + 1]
-                        - incident_mesh.positions[tri[0] as usize * 3 + 1],
-                    incident_mesh.positions[tri[1] as usize * 3 + 2]
-                        - incident_mesh.positions[tri[0] as usize * 3 + 2],
+                    positions[tri[1] as usize * 3 + 0] - positions[tri[0] as usize * 3 + 0],
+                    positions[tri[1] as usize * 3 + 1] - positions[tri[0] as usize * 3 + 1],
+                    positions[tri[1] as usize * 3 + 2] - positions[tri[0] as usize * 3 + 2],
                 ];
 
                 let initial = {
                     let edge2 = [
-                        incident_mesh.positions[edge[1] as usize * 3 + 0]
-                            - incident_mesh.positions[tri[0] as usize * 3 + 0],
-                        incident_mesh.positions[edge[1] as usize * 3 + 1]
-                            - incident_mesh.positions[tri[0] as usize * 3 + 1],
-                        incident_mesh.positions[edge[1] as usize * 3 + 2]
-                            - incident_mesh.positions[tri[0] as usize * 3 + 2],
+                        positions[edge[1] as usize * 3 + 0] - positions[tri[0] as usize * 3 + 0],
+                        positions[edge[1] as usize * 3 + 1] - positions[tri[0] as usize * 3 + 1],
+                        positions[edge[1] as usize * 3 + 2] - positions[tri[0] as usize * 3 + 2],
                     ];
 
                     [
@@ -195,9 +189,9 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
 
                 let second = {
                     let edge2 = [
-                        midpoint[0] - incident_mesh.positions[tri[0] as usize * 3 + 0],
-                        midpoint[1] - incident_mesh.positions[tri[0] as usize * 3 + 1],
-                        midpoint[2] - incident_mesh.positions[tri[0] as usize * 3 + 2],
+                        midpoint[0] - positions[tri[0] as usize * 3 + 0],
+                        midpoint[1] - positions[tri[0] as usize * 3 + 1],
+                        midpoint[2] - positions[tri[0] as usize * 3 + 2],
                     ];
 
                     [
@@ -217,8 +211,8 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
             true
         };
 
-        let collapse = |edge: &Edge, incident_mesh: &mut Mesh| {
-            let midpoint = incident_mesh.mid_point_2(edge[0], edge[1]);
+        let collapse = |edge: &Edge, incident_mesh: &mut TempMesh, positions: &mut Vec<f32>| {
+            let midpoint = mid_point_2(positions, edge[0], edge[1]);
             // -TEMP simplify run at the end will remove all unused
             // remove the original 2 indices, the vec shortens
             //
@@ -236,10 +230,11 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
             // // incident_mesh.positions.remove((edge[1] + 0) as usize);
             // // incident_mesh.positions.remove((edge[1] + 0) as usize);
 
-            let new_idx = incident_mesh.positions.len() / 3;
-            incident_mesh.positions.push(midpoint[0]);
-            incident_mesh.positions.push(midpoint[1]);
-            incident_mesh.positions.push(midpoint[2]);
+            let new_idx = positions.len() / 3;
+            positions.extend_from_slice(&midpoint);
+            // positions.push(midpoint[0]);
+            // positions.push(midpoint[1]);
+            // positions.push(midpoint[2]);
 
             // move all indices pointing to an index that got moved
             for idx in &mut incident_mesh.indices {
@@ -279,10 +274,10 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
         };
 
         if collapsible.is_empty() {
-            println!("positions: {}", incident_mesh.positions.len());
+            // println!("positions: {}", positions.len());
             println!("indices: {}", incident_mesh.indices.len());
 
-            write_mesh_to_file("debug_cluster_edge_collapsing", &incident_mesh);
+            // incident_mesh.write_mesh_to_file("debug_cluster_edge_collapsing", positions);
 
             panic!("This mesh cannot be simplified (no collapsibles)");
         }
@@ -292,13 +287,13 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
             idx += 1;
 
             if idx == collapsible.len() {
-                println!("positions: {}", incident_mesh.positions.len());
+                // println!("positions: {}", positions.len());
                 println!("indices: {}", incident_mesh.indices.len());
                 println!(
                     "This mesh cannot be simplified further (no edge passed collapsible test)"
                 );
 
-                write_mesh_to_file("debug_cluster_edge_collapsing", &incident_mesh);
+                // incident_mesh.write_mesh_to_file("debug_cluster_edge_collapsing", positions);
 
                 // panic!("This mesh cannot be simplified");
                 return incident_mesh;
@@ -308,7 +303,7 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
         let collapsed = collapsible[idx].1;
 
         // println!("collapsed: {:?}", collapsed);
-        let new_point = collapse(&collapsed, &mut incident_mesh);
+        let new_point = collapse(&collapsed, &mut incident_mesh, positions);
 
         // sanity check
         let removed_collapsed = collapsible.remove(idx);
@@ -360,6 +355,10 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
                     *kv.1 = new_edge(kv.1[0], kv.1[1]);
                 }
 
+                // if new_kv.1[0] == u32::MAX && new_kv.1[1] == u32::MAX {
+                //     continue;
+                // }
+
                 if key_changed {
                     additions.push(new_kv);
                 }
@@ -379,8 +378,12 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
                         if old[0] == u32::MAX { old[1] } else { old[0] },
                         if val[0] == u32::MAX { val[1] } else { val[0] },
                     );
-                    assert!(new[0] != u32::MAX && new[1] != u32::MAX);
-                    edges.insert(key, new);
+                    // assert!(if old[0] == u32::MAX { old[1] } else { old[0] } != u32::MAX);
+                    // assert!(if val[0] == u32::MAX { val[1] } else { val[0] } != u32::MAX);
+
+                    if new[0] != u32::MAX || new[1] != u32::MAX {
+                        edges.insert(key, new);
+                    }
                 }
             }
         }
@@ -553,7 +556,7 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
                         removals.push(idx);
                     } else {
                         contained.push(edge.1[1]);
-                        edge.0 = incident_mesh.sqr_dist(edge.1[0], edge.1[1]);
+                        edge.0 = sqr_dist(positions, edge.1[0], edge.1[1]);
                         edge.1 = new_edge(edge.1[0], edge.1[1]);
                     }
                 } else if edge.1[1] == collapsed[0] || edge.1[1] == collapsed[1] {
@@ -562,7 +565,7 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
                         removals.push(idx);
                     } else {
                         contained.push(edge.1[0]);
-                        edge.0 = incident_mesh.sqr_dist(edge.1[0], edge.1[1]);
+                        edge.0 = sqr_dist(positions, edge.1[0], edge.1[1]);
                         edge.1 = new_edge(edge.1[0], edge.1[1]);
                     }
                 }
@@ -595,9 +598,9 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
                 mut t_edges,
                 t_collapsible,
                 mut t_tri_dict,
-            ) = generate_necessary(&incident_mesh);
+            ) = generate_necessary(&incident_mesh, positions);
 
-            let mesh_positions;
+            // let mesh_positions;
             let mesh_indices;
             let mut vertices_map;
             let tris_set;
@@ -609,8 +612,8 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
             {
                 mesh_indices =
                     compare_vecs_w_order(&t_incident_mesh.indices, &incident_mesh.indices);
-                mesh_positions =
-                    compare_vecs_w_order(&t_incident_mesh.positions, &incident_mesh.positions);
+                // mesh_positions =
+                //     compare_vecs_w_order(&t_incident_mesh.positions, &incident_mesh.positions);
 
                 if !mesh_indices {
                     write!(writer, "mesh_indices_t: \n{:?} \n", t_incident_mesh.indices).unwrap();
@@ -621,20 +624,20 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
                     )
                     .unwrap();
                 }
-                if !mesh_positions {
-                    write!(
-                        writer,
-                        "mesh_positions_t: \n{:?} \n\n\n\n\n",
-                        t_incident_mesh.positions
-                    )
-                    .unwrap();
-                    write!(
-                        writer,
-                        "mesh_positions_o: \n{:?} \n\n\n\n\n",
-                        incident_mesh.positions
-                    )
-                    .unwrap();
-                }
+                // if !mesh_positions {
+                //     write!(
+                //         writer,
+                //         "mesh_positions_t: \n{:?} \n\n\n\n\n",
+                //         t_incident_mesh.positions
+                //     )
+                //     .unwrap();
+                //     write!(
+                //         writer,
+                //         "mesh_positions_o: \n{:?} \n\n\n\n\n",
+                //         incident_mesh.positions
+                //     )
+                //     .unwrap();
+                // }
             };
 
             // compare t_vertices
@@ -812,7 +815,7 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
 
             println!("Test Run");
             println!("mesh_indices: {}", mesh_indices);
-            println!("mesh_positions: {}", mesh_positions);
+            // println!("mesh_positions: {}", mesh_positions);
             println!("vertices_map: {}", vertices_map);
             println!("tris_set: {}", tris_set);
             println!("edges_map: {}", edges_map);
@@ -820,23 +823,24 @@ pub fn simplify(mesh: &Mesh, target_tris: u32) -> Mesh {
             println!("tri_dict_map: {}", tri_dict_map);
             println!("Test Run Complete \n\n\n");
 
-            if !(mesh_positions
-                && mesh_indices
-                && vertices_map
-                && tris_set
-                && edges_map
-                && collapsible_vec
-                && tri_dict_map)
-            {
+            if !(
+                //mesh_positions &&
+                mesh_indices
+                    && vertices_map
+                    && tris_set
+                    && edges_map
+                    && collapsible_vec
+                    && tri_dict_map
+            ) {
                 panic!("Test Run Failed");
             }
         }
     }
-    // };
 
-    let (indices, positions) =
-        simplify_indices_positions(&incident_mesh.indices, &incident_mesh.positions);
-    Mesh { indices, positions }
+    // let (indices, positions) = simplify_indices_positions(&incident_mesh.indices, &positions);
+    TempMesh {
+        indices: incident_mesh.indices,
+    }
 }
 
 pub fn generate_data_structures(
@@ -1101,9 +1105,7 @@ pub fn remove_duplicated_vertices(indices: &mut Vec<u32>, positions: &mut Vec<f3
     }
 
     // remove the values at the index_map.keys from positions
-    for idx in indices {
-        
-    }
+    for idx in indices {}
 }
 
 pub fn find_equivalent(
@@ -1340,5 +1342,40 @@ impl TempMesh {
             sum[1] / ((self.indices.len() / 3) as f32),
             sum[2] / ((self.indices.len() / 3) as f32),
         ]
+    }
+
+    pub fn write_mesh_to_file(&self, name: &str, positions: &mut Vec<f32>) {
+        let mut f = File::create(name.to_string() + ".obj").unwrap();
+        f.write_all(b"mtllib bunny.mtl\no bun_zipper\n").unwrap();
+        for v_idx in (0..positions.len()).step_by(3) {
+            f.write_all(
+                format!(
+                    "v {} {} {}\n",
+                    positions[v_idx + 0],
+                    positions[v_idx + 1],
+                    positions[v_idx + 2]
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+        }
+        f.write_all(b"usemtl None\ns off\n").unwrap();
+
+        f.write_all(format!("o {}\n", name).as_bytes()).unwrap();
+        for idx in (0..self.indices.len()).step_by(3) {
+            f.write_all(
+                format!(
+                    "f {} {} {}\n",
+                    self.indices[idx + 0] + 1,
+                    self.indices[idx + 1] + 1,
+                    self.indices[idx + 2] + 1
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+        }
+        f.write_all("\n".as_bytes()).unwrap();
+
+        f.flush().unwrap();
     }
 }

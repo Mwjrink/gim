@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::{fs::File, io::prelude::*};
 
@@ -65,12 +66,22 @@ pub struct SharedEdges {
 // }
 
 // TODO pub(crate) instead of all pub
-pub fn split_mesh(mesh: &Mesh, TRIS_IN_CLUSTER: usize) -> (HashMap<u32, Vec<(u32, i32)>>, CTree) {
+pub fn split_mesh(
+    mesh: &Mesh,
+    TRIS_IN_CLUSTER: usize,
+) -> (HashMap<u32, Vec<(u32, i32)>>, TempCTree, HashSet<Edge>) {
     // TODO - Minimize the degenerate clusters from the start, then just deal with what remains ...
     // TODO ... this is a multivariate optimization problem
     // TODO multi region growing
 
     let (edges, tris, _vertices) = generate_data_structures(&mesh.indices);
+
+    let mut mesh_edge = HashSet::new();
+    for edge in &edges {
+        if edge.1[0] == u32::MAX || edge.1[1] == u32::MAX {
+            mesh_edge.insert(edge.0);
+        }
+    }
 
     let mut clusters = Vec::with_capacity(mesh.indices.len() * 3 / TRIS_IN_CLUSTER + 1);
 
@@ -275,7 +286,14 @@ pub fn split_mesh(mesh: &Mesh, TRIS_IN_CLUSTER: usize) -> (HashMap<u32, Vec<(u32
                 connections.push((j, count as i32));
             }
         }
-        connections.sort_by(|a, b| b.1.cmp(&a.1));
+        connections.sort_by(|a, b| {
+            let cmp = b.1.cmp(&a.1);
+            if cmp == Ordering::Equal {
+                a.0.cmp(&b.0)
+            } else {
+                cmp
+            }
+        });
         shared_edges.insert(id, connections);
 
         // cut_length.push((id, ctree.get(&id).cut.len()));
@@ -283,22 +301,22 @@ pub fn split_mesh(mesh: &Mesh, TRIS_IN_CLUSTER: usize) -> (HashMap<u32, Vec<(u32
 
     if false {
         // adjacency graph
-//         for id in 0..clusters.len() as u32 {
-//             let mut connections = Vec::with_capacity(clusters.len());
-//             for j in 0..clusters.len() as u32 {
-//                 if id == j {
-//                     continue;
-//                 }
-// 
-//                 let count = ctree.get(&id).cut.intersection(&ctree.get(&j).cut).count();
-//                 if count > 0 {
-//                     connections.push((j, count as i32));
-//                 }
-//             }
-//             shared_edges.insert(id, connections);
-// 
-//             // cut_length.push((id, ctree.get(&id).cut.len()));
-//         }
+        //         for id in 0..clusters.len() as u32 {
+        //             let mut connections = Vec::with_capacity(clusters.len());
+        //             for j in 0..clusters.len() as u32 {
+        //                 if id == j {
+        //                     continue;
+        //                 }
+        //
+        //                 let count = ctree.get(&id).cut.intersection(&ctree.get(&j).cut).count();
+        //                 if count > 0 {
+        //                     connections.push((j, count as i32));
+        //                 }
+        //             }
+        //             shared_edges.insert(id, connections);
+        //
+        //             // cut_length.push((id, ctree.get(&id).cut.len()));
+        //         }
 
         let mut sum = [0.0, 0.0, 0.0];
         // calculate the center of all the degenerates
@@ -316,7 +334,7 @@ pub fn split_mesh(mesh: &Mesh, TRIS_IN_CLUSTER: usize) -> (HashMap<u32, Vec<(u32
 
         // for each degenerate, find the adjacent that is closest to the center that is not in the vec of previous adjacents visited
         for didx in &degenerates {
-            // let adj = 
+            // let adj =
         }
     };
 
@@ -543,22 +561,22 @@ pub fn split_mesh(mesh: &Mesh, TRIS_IN_CLUSTER: usize) -> (HashMap<u32, Vec<(u32
 
     write_clusters(&mesh.positions, &clusters);
 
-    let clusters = clusters
-        .clone()
-        .into_iter()
-        .map(|e| {
-            let (indices, positions, cut) =
-                simplify_indices_positions_cut(&e.mesh.indices, &mesh.positions, &e.cut);
-            Cluster {
-                mesh: Mesh { positions, indices },
-                cut,
-                anchor: e.anchor,
-            }
-        })
-        .collect();
+    // let clusters = clusters
+    //     .clone()
+    //     .into_iter()
+    //     .map(|e| {
+    //         let (indices, positions, cut) =
+    //             simplify_indices_positions_cut(&e.mesh.indices, &mesh.positions, &e.cut);
+    //         Cluster {
+    //             mesh: Mesh { positions, indices },
+    //             cut,
+    //             anchor: e.anchor,
+    //         }
+    //     })
+    //     .collect();
 
     // clusters as a return is temporary for debug printing
-    (shared_edges, CTree::from_clusters(clusters)) //ctree.to_official(&mesh.positions))
+    (shared_edges, ctree, mesh_edge) //ctree.to_official(&mesh.positions))
 }
 
 fn remove_tri(

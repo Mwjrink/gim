@@ -1,3 +1,6 @@
+use std::fs::File;
+use std::io::Write;
+
 use crate::{
     cluster::*,
     mesh::{simplify_indices_positions_cut, Mesh},
@@ -12,6 +15,8 @@ pub struct CTreeNode {
     pub cluster: u32,
     pub parents: [u32; 2],
     pub children: [u32; 4],
+    // is this needed in the final tree or just for TempCTree, should there be a TempCTreeNode?
+    pub lod: u32,
 }
 
 impl CTree {
@@ -34,6 +39,7 @@ impl CTree {
                 cluster: idx as u32,
                 parents: [u32::MAX, u32::MAX],
                 children: [u32::MAX, u32::MAX, u32::MAX, u32::MAX],
+                lod: 0,
             });
         }
 
@@ -48,11 +54,30 @@ impl CTree {
     ) -> u32 {
         let id = self.clusters.len() as u32;
         self.clusters.push(cluster);
+        let mut lod_map: Vec<u32> = children_ids
+            .iter()
+            .map(|idx| self.nodes[*idx as usize].lod)
+            .collect();
+        lod_map.sort();
         self.nodes.push(CTreeNode {
             cluster: id,
             parents: *parent_ids,
             children: *children_ids,
+            lod: *lod_map.last().unwrap_or(&0),
         });
+
+        for child_id in children_ids {
+            if *child_id != u32::MAX {
+                let parents = &mut self.nodes[*child_id as usize].parents;
+                if parents[0] == u32::MAX {
+                    parents[0] = id;
+                } else if parents[1] == u32::MAX {
+                    parents[1] = id;
+                } else {
+                    panic!("more than one parent for child: {}", child_id);
+                }
+            }
+        }
 
         id
     }
@@ -60,6 +85,10 @@ impl CTree {
     // TODO return an option and clusters.get(id) instead
     pub fn get(&self, id: &u32) -> &Cluster {
         &self.clusters[*id as usize]
+    }
+
+    pub fn get_lod(&self, id: &u32) -> u32 {
+        self.nodes[*id as usize].lod
     }
 
     // TODO return an option and clusters.get(id) instead
@@ -71,8 +100,56 @@ impl CTree {
         self.clusters.len()
     }
 
-    pub fn clusters(self) -> Vec<Cluster> {
-        self.clusters
+    pub fn clusters(&self) -> &Vec<Cluster> {
+        &self.clusters
+    }
+
+    pub fn write_to_file(&self, file_name: &str) {
+        let mut write_file = File::create(format!("./output/{}", file_name)).unwrap();
+
+        // write number of nodes
+        write_file.write_all(&(self.nodes.len() as u32).to_le_bytes()).unwrap();
+
+        // TODO should these be sorted so the highest parents are the first ones then you can split from there?
+        for node in &self.nodes {
+            /*
+            cluster: u32,
+            parents: [u32; 2], // dont write this?
+            children: [u32; 4],
+            lod: u32, // dont write this?
+            */
+            write_file.write_all(&node.cluster.to_le_bytes()).unwrap();
+            // write the nodes themselves, write the indices as file pointers/offsets?
+            // TODO write the clusters to a temp buffer first and keep track of the offsets of each cluster, then use the offsets as the id here/pointer/fseek-offset for reading
+            write_file.write_all(&node.children[0].to_le_bytes()).unwrap();
+            write_file.write_all(&node.children[1].to_le_bytes()).unwrap();
+            write_file.write_all(&node.children[2].to_le_bytes()).unwrap();
+            write_file.write_all(&node.children[3].to_le_bytes()).unwrap();
+        }
+
+        // write the number of clusters
+        write_file.write_all(&(self.clusters.len() as u32).to_le_bytes()).unwrap();
+
+        // write the clusters themselves
+        for cluster in &self.clusters {
+            /*
+            cluster: u32,
+            parents: [u32; 2], // dont write this?
+            children: [u32; 4],
+            lod: u32, // dont write this?
+            */
+            // positions list can be a raw list of f32, dump the raw bits from the vec
+            write_file.write_all(&cluster.mesh.positions.len().to_le_bytes()).unwrap();
+            for pos in &cluster.mesh.positions {
+                write_file.write_all(&pos.to_le_bytes()).unwrap();
+            }
+
+            // indices list can be 14bits for the first value then 5/5 bits? for the other two?
+            write_file.write_all(&cluster.mesh.indices.len().to_le_bytes()).unwrap();
+            for idx in &cluster.mesh.indices {
+                write_file.write_all(&idx.to_le_bytes()).unwrap();
+            }
+        }
     }
 }
 
@@ -97,6 +174,7 @@ impl TempCTree {
                 cluster: idx as u32,
                 parents: [u32::MAX, u32::MAX],
                 children: [u32::MAX, u32::MAX, u32::MAX, u32::MAX],
+                lod: 0,
             });
         }
 
@@ -111,11 +189,35 @@ impl TempCTree {
     ) -> u32 {
         let id = self.clusters.len() as u32;
         self.clusters.push(cluster);
+        let mut lod_map: Vec<u32> = children_ids
+            .iter()
+            .map(|idx| self.nodes[*idx as usize].lod)
+            .collect();
+        lod_map.sort();
+        let lod = if let Some(lod_level) = lod_map.last() {
+            lod_level + 1
+        } else {
+            0
+        };
         self.nodes.push(CTreeNode {
             cluster: id,
             parents: *parent_ids,
             children: *children_ids,
+            lod,
         });
+
+        for child_id in children_ids {
+            if *child_id != u32::MAX {
+                let parents = &mut self.nodes[*child_id as usize].parents;
+                if parents[0] == u32::MAX {
+                    parents[0] = id;
+                } else if parents[1] == u32::MAX {
+                    parents[1] = id;
+                } else {
+                    panic!("more than one parent for child: {}", child_id);
+                }
+            }
+        }
 
         id
     }
@@ -128,6 +230,14 @@ impl TempCTree {
     // TODO return an option and clusters.get(id) instead
     pub fn get_mut(&mut self, id: &u32) -> &mut TempCluster {
         &mut self.clusters[*id as usize]
+    }
+
+    pub fn len(&self) -> usize {
+        self.clusters.len()
+    }
+
+    pub fn clusters(self) -> Vec<TempCluster> {
+        self.clusters
     }
 
     pub fn to_official(self, positions: &Vec<f32>) -> CTree {
@@ -143,5 +253,14 @@ impl TempCTree {
         }
 
         CTree::from_raw(self.nodes, clusters)
+    }
+
+    pub fn get_lod(&self, id: &u32) -> u32 {
+        self.nodes[*id as usize].lod
+    }
+
+    pub fn has_parent(&self, id: &u32) -> bool {
+        let parents = self.nodes[*id as usize].parents;
+        parents[0] != u32::MAX || parents[1] != u32::MAX
     }
 }

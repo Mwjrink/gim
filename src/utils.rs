@@ -58,7 +58,7 @@ pub fn compare_vecs_w_order_customeq<T, E: Fn(&T, &T) -> bool>(a: &[T], b: &[T],
     }
 
     for i in 0..a.len() {
-        if equal(&a[i], &b[i]) {
+        if !equal(&a[i], &b[i]) {
             return false;
         }
     }
