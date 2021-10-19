@@ -1,5 +1,5 @@
-use std::fs::File;
 use std::io::Write;
+use std::{fs::File, mem};
 
 use crate::{
     cluster::*,
@@ -105,31 +105,14 @@ impl CTree {
     }
 
     pub fn write_to_file(&self, file_name: &str) {
+        let u32_size = mem::size_of::<u32>();
+
         let mut write_file = File::create(format!("./output/{}", file_name)).unwrap();
+        let mut cluster_buffer = Vec::with_capacity(self.clusters.len() * u32_size * 4 * 384);
+        let mut node_buffer = Vec::with_capacity(self.nodes.len() * u32_size * 5);
+        let mut offsets = Vec::with_capacity(self.clusters.len());
 
-        // write number of nodes
-        write_file.write_all(&(self.nodes.len() as u32).to_le_bytes()).unwrap();
-
-        // TODO should these be sorted so the highest parents are the first ones then you can split from there?
-        for node in &self.nodes {
-            /*
-            cluster: u32,
-            parents: [u32; 2], // dont write this?
-            children: [u32; 4],
-            lod: u32, // dont write this?
-            */
-            write_file.write_all(&node.cluster.to_le_bytes()).unwrap();
-            // write the nodes themselves, write the indices as file pointers/offsets?
-            // TODO write the clusters to a temp buffer first and keep track of the offsets of each cluster, then use the offsets as the id here/pointer/fseek-offset for reading
-            write_file.write_all(&node.children[0].to_le_bytes()).unwrap();
-            write_file.write_all(&node.children[1].to_le_bytes()).unwrap();
-            write_file.write_all(&node.children[2].to_le_bytes()).unwrap();
-            write_file.write_all(&node.children[3].to_le_bytes()).unwrap();
-        }
-
-        // write the number of clusters
-        write_file.write_all(&(self.clusters.len() as u32).to_le_bytes()).unwrap();
-
+        let mut offset = 0;
         // write the clusters themselves
         for cluster in &self.clusters {
             /*
@@ -139,17 +122,56 @@ impl CTree {
             lod: u32, // dont write this?
             */
             // positions list can be a raw list of f32, dump the raw bits from the vec
-            write_file.write_all(&cluster.mesh.positions.len().to_le_bytes()).unwrap();
+            cluster_buffer.extend_from_slice(&cluster.mesh.positions.len().to_le_bytes());
             for pos in &cluster.mesh.positions {
-                write_file.write_all(&pos.to_le_bytes()).unwrap();
+                cluster_buffer.extend_from_slice(&pos.to_le_bytes());
             }
 
             // indices list can be 14bits for the first value then 5/5 bits? for the other two?
-            write_file.write_all(&cluster.mesh.indices.len().to_le_bytes()).unwrap();
+            cluster_buffer.extend_from_slice(&cluster.mesh.indices.len().to_le_bytes());
             for idx in &cluster.mesh.indices {
-                write_file.write_all(&idx.to_le_bytes()).unwrap();
+                cluster_buffer.extend_from_slice(&idx.to_le_bytes());
             }
+
+            offsets.push(offset);
+            offset += cluster_buffer.len();
         }
+
+        // TODO should these be sorted so the highest parents are the first ones then you can split from there?
+        for node in &self.nodes {
+            /*
+            cluster: u32,
+            parents: [u32; 2], // dont write this?
+            children: [u32; 4],
+            lod: u32, // dont write this?
+            */
+            let offset = (offsets[node.cluster as usize]
+                + self.nodes.len() * u32_size * 5
+                + u32_size) as u32;
+            node_buffer.extend_from_slice(&offset.to_le_bytes());
+            // write the nodes themselves, write the indices as file pointers/offsets?
+            // TODO write the clusters to a temp buffer first and keep track of the offsets of each cluster, then use the offsets as the id here/pointer/fseek-offset for reading
+            node_buffer.extend_from_slice(&node.children[0].to_le_bytes());
+            node_buffer.extend_from_slice(&node.children[1].to_le_bytes());
+            node_buffer.extend_from_slice(&node.children[2].to_le_bytes());
+            node_buffer.extend_from_slice(&node.children[3].to_le_bytes());
+
+            // raw parts?
+        }
+
+        // write number of nodes
+        write_file
+            .write_all(&(self.nodes.len() as u32).to_le_bytes())
+            .unwrap();
+
+        write_file.write_all(&node_buffer).unwrap();
+
+        // write the number of clusters
+        // write_file
+        //     .write_all(&(self.clusters.len() as u32).to_le_bytes())
+        //     .unwrap();
+
+        write_file.write_all(&cluster_buffer).unwrap();
     }
 }
 

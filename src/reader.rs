@@ -1,94 +1,63 @@
-use std::{convert::TryInto, fs, fs::File, io::Read, mem};
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::Read;
+use std::mem;
+use std::os::windows::prelude::FileExt;
 
-// TODO: make these not pub, have access methods
-pub struct Model {
-    pub albedo: Texture,
-    // pub gloss:    Texture,
-    // pub specular: Texture,
-    pub x:      Vec<f32,>,
-    pub y:      Vec<f32,>,
-    pub z:      Vec<f32,>,
-    pub u:      Vec<f32,>,
-    pub v:      Vec<f32,>,
+// enum ClusterCollection {
+//     map(HashMap<u32, Cluster>),
+//     vec(Vec<Cluster>),
+// }
+
+pub struct CTree {
+    pub nodes: Vec<Node>,
+    pub clusters: Vec<Cluster>,
+    pub parents: [u32; 2],
+    file: File,
 }
 
-pub struct Texture {
-    pub raw_pixels: Vec<u8,>,
-    pub width:      u32,
-    pub height:     u32,
+pub struct Cluster {
+    pub pos: Vec<f32>,
+    pub idx: Vec<u32>,
 }
 
-fn to_x4<T,>(array: &[T],) -> &[T; 4] {
-    array
-        .try_into()
-        .expect("to_x4 has found a chunk with an incorrect length",)
+#[repr(C)]
+pub struct Node {
+    pub offset: u32,
+    pub children: [u32; 4],
 }
 
-fn load_texture(file_name: &str,) -> Texture {
-    let mut file = File::open(file_name,).unwrap();
+pub fn read(file_name: String) -> CTree {
+    let mut read_file = File::open(file_name).unwrap();
 
-    let mut size_buf = vec![0u8; 8];
-    file.read_exact(&mut size_buf,).unwrap();
+    let mut u32_buff = [0 as u8; mem::size_of::<u32>()];
+    read_file.read_exact(&mut u32_buff).unwrap();
+    let nodes_length = u32::from_le_bytes(u32_buff) as usize;
 
-    let width = u32::from_le_bytes(size_buf[0..4].try_into().unwrap(),);
-    let height = u32::from_le_bytes(size_buf[4..8].try_into().unwrap(),);
+    assert!(mem::size_of::<Node>() == mem::size_of::<u32>() * 5);
 
-    let mut raw_pixels = Vec::with_capacity(width as usize * height as usize * mem::size_of::<u32,>(),);
-    file.read_to_end(&mut raw_pixels,).unwrap();
-    // file.read_to_end(buf,);
+    let buffer = Vec::<u8>::with_capacity(mem::size_of::<Node>() * nodes_length as usize);
+    read_file.read_exact(&mut buffer).unwrap();
+    let ptr = buffer.as_mut_ptr();
+    let cap = buffer.capacity();
+    let len = buffer.len();
+    mem::forget(buffer); // Avoid calling the destructor!
 
-    // this is safe because I wrote the file therefore I know this will work
-    // let raw_pixels = unsafe {
-    //     let length = (width * height) as usize;
-    //     let capacity = temp_vec.capacity() / 4;
-    //     let ptr = temp_vec.as_mut_ptr() as *mut u32;
+    let nodes: Vec<Node> =
+        unsafe { Vec::from_raw_parts(ptr as *mut Node, nodes_length, nodes_length) };
 
-    //     // Don't run the destructor for vec32
-    //     mem::forget(temp_vec,);
+    let mut u32_buff = [0 as u8; mem::size_of::<u32>()];
+    read_file.read_exact(&mut u32_buff).unwrap();
+    let clusters_length = u32::from_le_bytes(u32_buff) as usize;
 
-    //     // Construct new Vec
-    //     Vec::from_raw_parts(ptr, length, capacity,)
-    // };
+    // SeekFrom::Start(42) for seek()
+    read_file.seek_read(buf, offset);
 
-    Texture {
-        raw_pixels,
-        width,
-        height,
-    }
-}
+    let parents = [u32; 2];
 
-fn load_mesh_texture(file_name: &str,) -> Option<Vec<f32,>,> {
-    let temp_vec: Vec<u8,> = fs::read(file_name,).unwrap();//(vec![],);
-    Some(temp_vec.chunks(4,).map(|i| f32::from_le_bytes(*to_x4(i,),),).collect(),)
-}
-
-impl Model {
-    pub fn load(file_name: &str,) -> Self {
-        // necessary
-        let albedo = load_texture(format!("{}.nlvoa", file_name).as_str(),);
-
-        let x: Vec<f32,> = load_mesh_texture(format!("{}.nlvox", file_name).as_str(),).unwrap();
-        let y: Vec<f32,> = load_mesh_texture(format!("{}.nlvoy", file_name).as_str(),).unwrap();
-        let z: Vec<f32,> = load_mesh_texture(format!("{}.nlvoz", file_name).as_str(),).unwrap();
-
-        let u: Vec<f32,> = load_mesh_texture(format!("{}.nlvou", file_name).as_str(),).unwrap();
-        let v: Vec<f32,> = load_mesh_texture(format!("{}.nlvov", file_name).as_str(),).unwrap();
-
-        // unecessary, load_texture?
-        // let gloss = load_mesh_texture(format!("{}.nlvog", file_name).as_str(),).unwrap_or_else(|| vec![],);
-        // let specular = load_mesh_texture(format!("{}.nlvos", file_name).as_str(),).unwrap_or_else(|| vec![],);
-
-        Self {
-            albedo,
-            // gloss,
-            // specular,
-            x,
-            y,
-            z,
-            //
-            u,
-            v,
-        }
-        //
+    CTree {
+        nodes,
+        clusters,
+        parents,
     }
 }

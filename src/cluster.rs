@@ -65,21 +65,30 @@ pub struct SharedEdges {
 //     (clusters, shared_edges, ctree)
 // }
 
+/* 
+TODO
+ - try a multi-region-growing
+    - choose (mesh.triangles.count / TRIS_IN_CLUSTER) unique random points on the mesh, grow each one individually testing the surrounding seed locations to see where to put the clusters
+    - for every cluster that is larger than 128 see if there are adjacent clusters with less triangles and move some triangles to those or split the cluster if it is larger than TRIS_IN_CLUSTER * 2 or 3 etc
+    - ensure all clusters are <= TRIS_IN_CLUSTER
+ 
+ - try a splitting approach
+    - split the mesh in half and then those halves repeatedly until you have clusters where each is <= TRIS_IN_CLUSTER
+
+*/
+
+
 // TODO pub(crate) instead of all pub
 pub fn split_mesh(
     mesh: &Mesh,
     TRIS_IN_CLUSTER: usize,
 ) -> (HashMap<u32, Vec<(u32, i32)>>, TempCTree, HashSet<Edge>) {
-    // TODO - Minimize the degenerate clusters from the start, then just deal with what remains ...
-    // TODO ... this is a multivariate optimization problem
-    // TODO multi region growing
-
     let (edges, tris, _vertices) = generate_data_structures(&mesh.indices);
 
     let mut mesh_edge = HashSet::new();
     for edge in &edges {
         if edge.1[0] == u32::MAX || edge.1[1] == u32::MAX {
-            mesh_edge.insert(edge.0);
+            mesh_edge.insert(*edge.0);
         }
     }
 
@@ -318,24 +327,24 @@ pub fn split_mesh(
         //             // cut_length.push((id, ctree.get(&id).cut.len()));
         //         }
 
-        let mut sum = [0.0, 0.0, 0.0];
-        // calculate the center of all the degenerates
-        for didx in &degenerates {
-            let degen = ctree.get(&didx);
-            sum[0] += degen.anchor[0];
-            sum[1] += degen.anchor[1];
-            sum[2] += degen.anchor[2];
-        }
-        let center = [
-            sum[0] / degenerates.len() as f32,
-            sum[1] / degenerates.len() as f32,
-            sum[2] / degenerates.len() as f32,
-        ];
-
-        // for each degenerate, find the adjacent that is closest to the center that is not in the vec of previous adjacents visited
-        for didx in &degenerates {
-            // let adj =
-        }
+//         let mut sum = [0.0, 0.0, 0.0];
+//         // calculate the center of all the degenerates
+//         for didx in &degenerates {
+//             let degen = ctree.get(&didx);
+//             sum[0] += degen.anchor[0];
+//             sum[1] += degen.anchor[1];
+//             sum[2] += degen.anchor[2];
+//         }
+//         let center = [
+//             sum[0] / degenerates.len() as f32,
+//             sum[1] / degenerates.len() as f32,
+//             sum[2] / degenerates.len() as f32,
+//         ];
+// 
+//         // for each degenerate, find the adjacent that is closest to the center that is not in the vec of previous adjacents visited
+//         for didx in &degenerates {
+//             // let adj =
+//         }
     };
 
     // iterative Monte-Carlo fix the meshes

@@ -52,7 +52,7 @@ pub fn write(mesh: &mut Mesh) -> CTree {
 
     // panic!();
 
-    // TODO rewrite this, use a different algorithm to find the best combination of clusters to combine, take into account the layer/lod level
+    // TODO NANITE @Karris: Specifically, we optimize for the number of boundary edges and number of triangles per cluster
     // !SECTION - Combine the clusters into a graph
     {
         let mut clusters: Vec<u32> = (0..ctree.len() as u32).collect();
