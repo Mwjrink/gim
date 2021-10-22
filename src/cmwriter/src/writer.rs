@@ -6,8 +6,6 @@ use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::Write;
 
-use rand::Rng;
-
 use crate::cluster::*;
 use crate::ctree::*;
 use crate::mesh::*;
@@ -52,6 +50,7 @@ pub fn write(mesh: &mut Mesh) -> CTree {
 
     // panic!();
 
+    // TODO this is called graph partitioning
     // TODO NANITE @Karris: Specifically, we optimize for the number of boundary edges and number of triangles per cluster
     // !SECTION - Combine the clusters into a graph
     {
@@ -754,108 +753,11 @@ pub fn write(mesh: &mut Mesh) -> CTree {
     }
     // !SECTION - Combine the clusters into a graph
 
-    // !SECTION - Generate debug.obj mesh
-    //     println!("Generate debug.obj mesh");
-    //     {
-    //         let mut f = File::create("debug.obj").unwrap();
-    //         f.write_all(b"mtllib bunny.mtl\no bun_zipper\n").unwrap();
-    //         for v_idx in (0..mesh.positions.len()).step_by(3) {
-    //             f.write_all(
-    //                 format!(
-    //                     "v {} {} {}\n",
-    //                     mesh.positions[v_idx + 0],
-    //                     mesh.positions[v_idx + 1],
-    //                     mesh.positions[v_idx + 2]
-    //                 )
-    //                 .as_bytes(),
-    //             )
-    //             .unwrap();
-    //         }
-    //         f.write_all(b"usemtl None\ns off\n").unwrap();
-    //
-    //         // for t in tris {
-    //         //     f.write_all(format!("f {} {} {}\n", t[0] + 1, t[1] + 1, t[2] + 1).as_bytes())
-    //         //         .unwrap();
-    //         // }
-    //         // for verts in cut_vertices {
-    //         //     for v in verts.1 {
-    //         //         f.write_all(format!("l {} {}\n", verts.0 + 1, v + 1).as_bytes())
-    //         //             .unwrap();
-    //         //     }
-    //         // }
-    //         // for e in edges {
-    //         //     f.write_all(format!("l {} {}\n", e.0[0] + 1, e.0[1] + 1).as_bytes())
-    //         //         .unwrap();
-    //         // }
-    //         // for p in pairs {
-    //         //     f.write_all(
-    //         //         format!("l {} {}\n", boundary_groups[p[0]][0] + 1, boundary_groups[p[1]][0] + 1).as_bytes(),
-    //         //     )
-    //         //     .unwrap();
-    //         // }
-    //         // {
-    //         //     // for idx in 1..final_cut_path.len() {}
-    //         //     let path = final_cut_path
-    //         //         .iter()
-    //         //         .map(|pt| format!("{}", pt + 1))
-    //         //         .collect::<Vec<String>>()
-    //         //         .join(" ");
-    //         //     f.write_all(format!("l {}\n", path).as_bytes()).unwrap();
-    //         // }
-    //
-    //         // !Most recent vvv
-    //         // for e in edge_path {
-    //         //     f.write_all(format!("l {} {}\n", e[0] + 1, e[1] + 1).as_bytes())
-    //         //         .unwrap();
-    //         // }
-    //         // for group in &boundary_groups {
-    //         //     for idx in 1..group.len() {
-    //         //         f.write_all(
-    //         //             format!("l {} {}\n", group[idx - 1] + 1, group[idx] + 1).as_bytes(),
-    //         //         )
-    //         //         .unwrap();
-    //         //     }
-    //         // }
-    //
-    //         //             f.write_all(format!("o prev_cluster_cut_1\n").as_bytes())
-    //         //                 .unwrap();
-    //         //             f.write_all(prev_cluster_cut.as_bytes()).unwrap();
-    //         //
-    //         //             f.write_all(format!("o last_cluster_cut_2\n").as_bytes())
-    //         //                 .unwrap();
-    //         //             f.write_all(last_cluster_cut.as_bytes()).unwrap();
-    //         //
-    //         //             f.write_all(format!("o prev_overall_cut_1\n").as_bytes())
-    //         //                 .unwrap();
-    //         //             f.write_all(prev_overall_cut.as_bytes()).unwrap();
-    //         //
-    //         //             f.write_all(format!("o last_overall_cut_2\n").as_bytes())
-    //         //                 .unwrap();
-    //         //             f.write_all(last_overall_cut.as_bytes()).unwrap();
-    //
-    //         for (idx, cluster) in clusters.iter().enumerate() {
-    //             f.write_all(format!("o Cluster{}\n", idx + 1).as_bytes())
-    //                 .unwrap();
-    //             for idx in (0..cluster.mesh.indices.len()).step_by(3) {
-    //                 f.write_all(
-    //                     format!(
-    //                         "f {} {} {}\n",
-    //                         cluster.mesh.indices[idx + 0] + 1,
-    //                         cluster.mesh.indices[idx + 1] + 1,
-    //                         cluster.mesh.indices[idx + 2] + 1
-    //                     )
-    //                     .as_bytes(),
-    //                 )
-    //                 .unwrap();
-    //             }
-    //             f.write_all("\n".as_bytes()).unwrap();
-    //         }
-    //
-    //         f.flush().unwrap();
-    //     };
-    // !SECTION - Generate debug.obj mesh
+    let mut ctree = ctree.to_official(&mesh.positions);
 
-    let ctree = ctree.to_official(&mesh.positions);
+    // for cluster in &ctree.clusters {
+    //     println!("cluster positions len: {}", cluster.mesh.positions.len());
+    // }
 
     // write_clusters(ctree.clusters());
 
@@ -868,6 +770,8 @@ pub fn write(mesh: &mut Mesh) -> CTree {
         ctree.write_to_file("test_output.cm");
     };
     // !SECTION - Write ctree to file
+
+    println!("og len: {}", ctree.len());
 
     println!("finished");
 
@@ -1104,7 +1008,7 @@ fn recalculate_shared_edges(
 }
 
 fn write_clusters(clusters: &Vec<Cluster>) {
-    let mut rng = rand::thread_rng();
+    // let mut rng = rand::thread_rng();
 
     let mut f = File::create("clusters.obj").unwrap();
     f.write_all(b"mtllib bunny.mtl\no bun_zipper\n").unwrap();
@@ -1114,18 +1018,18 @@ fn write_clusters(clusters: &Vec<Cluster>) {
     for cluster in clusters {
         // f.write_all(format!("o Cluster{}\n", idx + 1).as_bytes())
         //     .unwrap();
-        let color: [f32; 3] = [rng.gen(), rng.gen(), rng.gen()];
+        // let color: [f32; 3] = [rng.gen(), rng.gen(), rng.gen()];
         offsets.push(offset);
         for pos in (0..cluster.mesh.positions.len()).step_by(3) {
             f.write_all(
                 format!(
-                    "v {} {} {} {} {} {}\n",
+                    "v {} {} {} \n", // {} {} {}
                     cluster.mesh.positions[pos + 0],
                     cluster.mesh.positions[pos + 1],
                     cluster.mesh.positions[pos + 2],
-                    color[0],
-                    color[1],
-                    color[2]
+                    // color[0],
+                    // color[1],
+                    // color[2]
                 )
                 .as_bytes(),
             )

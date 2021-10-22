@@ -8,6 +8,7 @@ use crate::{
 
 pub struct CTree {
     pub nodes: Vec<CTreeNode>,
+    pub offsets: Vec<usize>,
     pub clusters: Vec<Cluster>,
 }
 
@@ -17,6 +18,9 @@ pub struct CTreeNode {
     pub children: [u32; 4],
     // is this needed in the final tree or just for TempCTree, should there be a TempCTreeNode?
     pub lod: u32,
+
+    // TEMP
+    pub offset: u32
 }
 
 impl CTree {
@@ -24,11 +28,16 @@ impl CTree {
         CTree {
             nodes: Vec::new(),
             clusters: Vec::new(),
+            offsets: vec![],
         }
     }
 
     pub fn from_raw(nodes: Vec<CTreeNode>, clusters: Vec<Cluster>) -> CTree {
-        CTree { nodes, clusters }
+        CTree {
+            nodes,
+            clusters,
+            offsets: vec![],
+        }
     }
 
     /// You can assume the id of the cluster is its index in the provided vector
@@ -40,10 +49,15 @@ impl CTree {
                 parents: [u32::MAX, u32::MAX],
                 children: [u32::MAX, u32::MAX, u32::MAX, u32::MAX],
                 lod: 0,
+                offset: 0
             });
         }
 
-        CTree { nodes, clusters }
+        CTree {
+            nodes,
+            clusters,
+            offsets: vec![],
+        }
     }
 
     pub fn insert(
@@ -64,6 +78,7 @@ impl CTree {
             parents: *parent_ids,
             children: *children_ids,
             lod: *lod_map.last().unwrap_or(&0),
+            offset: 0
         });
 
         for child_id in children_ids {
@@ -87,6 +102,11 @@ impl CTree {
         &self.clusters[*id as usize]
     }
 
+    pub fn get_w_offset(&self, id: &u32) -> (&Cluster, usize) {
+        assert!(self.nodes[*id as usize].cluster == *id);
+        (&self.clusters[*id as usize], self.offsets[*id as usize])
+    }
+
     pub fn get_lod(&self, id: &u32) -> u32 {
         self.nodes[*id as usize].lod
     }
@@ -104,7 +124,11 @@ impl CTree {
         &self.clusters
     }
 
-    pub fn write_to_file(&self, file_name: &str) {
+    pub fn get_node(&self, id: &usize) -> &CTreeNode {
+        &self.nodes[*id]
+    }
+
+    pub fn write_to_file(&mut self, file_name: &str) {
         let u32_size = mem::size_of::<u32>();
 
         let mut write_file = File::create(format!("./output/{}", file_name)).unwrap();
@@ -122,32 +146,32 @@ impl CTree {
             lod: u32, // dont write this?
             */
             // positions list can be a raw list of f32, dump the raw bits from the vec
-            cluster_buffer.extend_from_slice(&cluster.mesh.positions.len().to_le_bytes());
+            cluster_buffer.extend_from_slice(&(cluster.mesh.positions.len() as u32).to_le_bytes());
             for pos in &cluster.mesh.positions {
                 cluster_buffer.extend_from_slice(&pos.to_le_bytes());
             }
 
             // indices list can be 14bits for the first value then 5/5 bits? for the other two?
-            cluster_buffer.extend_from_slice(&cluster.mesh.indices.len().to_le_bytes());
+            cluster_buffer.extend_from_slice(&(cluster.mesh.indices.len() as u32).to_le_bytes());
             for idx in &cluster.mesh.indices {
                 cluster_buffer.extend_from_slice(&idx.to_le_bytes());
             }
 
             offsets.push(offset);
-            offset += cluster_buffer.len();
+            offset = cluster_buffer.len();
         }
 
         // TODO should these be sorted so the highest parents are the first ones then you can split from there?
-        for node in &self.nodes {
+        let cluster_offset = self.nodes.len() * u32_size * 5 + u32_size;
+        for node in &mut self.nodes {
             /*
             cluster: u32,
             parents: [u32; 2], // dont write this?
             children: [u32; 4],
             lod: u32, // dont write this?
             */
-            let offset = (offsets[node.cluster as usize]
-                + self.nodes.len() * u32_size * 5
-                + u32_size) as u32;
+            let offset = (offsets[node.cluster as usize] + cluster_offset) as u32;
+            node.offset = offset;
             node_buffer.extend_from_slice(&offset.to_le_bytes());
             // write the nodes themselves, write the indices as file pointers/offsets?
             // TODO write the clusters to a temp buffer first and keep track of the offsets of each cluster, then use the offsets as the id here/pointer/fseek-offset for reading
@@ -159,12 +183,16 @@ impl CTree {
             // raw parts?
         }
 
+        self.offsets = offsets;
+
         // write number of nodes
         write_file
             .write_all(&(self.nodes.len() as u32).to_le_bytes())
             .unwrap();
 
         write_file.write_all(&node_buffer).unwrap();
+
+        assert!(cluster_offset == node_buffer.len() + 4);
 
         // write the number of clusters
         // write_file
@@ -197,6 +225,7 @@ impl TempCTree {
                 parents: [u32::MAX, u32::MAX],
                 children: [u32::MAX, u32::MAX, u32::MAX, u32::MAX],
                 lod: 0,
+                offset: 0
             });
         }
 
@@ -226,6 +255,7 @@ impl TempCTree {
             parents: *parent_ids,
             children: *children_ids,
             lod,
+            offset: 0
         });
 
         for child_id in children_ids {

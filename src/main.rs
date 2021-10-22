@@ -1,4 +1,7 @@
-use gim::mesh::*;
+use cmreader::reader;
+use cmwriter::mesh::*;
+use cmwriter::utils::*;
+use cmwriter::writer;
 // 3.15 GB (3,390,337,024 bytes)
 
 // So, say an object that is 10 feet tall is 100 feet away. If I hold up a ruler 3 feet away, then the object in the
@@ -30,7 +33,53 @@ fn main() {
             indices: mesh.indices.clone(),
         };
 
-        let _output = gim::writer::write(&mut mesh);
+        let output = writer::write(&mut mesh);
+
+        let mut read = reader::read("output/test_output.cm");
+        println!("read len: {}\nout len: {}\n\n", read.len(), output.len());
+
+        for idx in 0..output.len() {
+            let onode = output.get_node(&idx);
+            let rnode = read.get_node(&idx);
+
+            // println!("offset      onode: {} | rnode: {}", onode.offset,      &rnode.offset);
+            // println!("children[0] onode: {} | rnode: {}", onode.children[0], &rnode.children[0]);
+            // println!("children[1] onode: {} | rnode: {}", onode.children[1], &rnode.children[1]);
+            // println!("children[2] onode: {} | rnode: {}", onode.children[2], &rnode.children[2]);
+            // println!("children[3] onode: {} | rnode: {}", onode.children[3], &rnode.children[3]);
+
+            assert!(onode.offset == rnode.offset);
+            assert!(onode.children[0] == rnode.children[0]);
+            assert!(onode.children[1] == rnode.children[1]);
+            assert!(onode.children[2] == rnode.children[2]);
+            assert!(onode.children[3] == rnode.children[3]);
+        }
+
+        for idx in 0..output.len() {
+            let (outp_cluster, ooffset) = output.get_w_offset(&(idx as u32));
+            // println!(
+            //     "outp_cluster.mesh.positions len: {}",
+            //     outp_cluster.mesh.positions.len()
+            // );
+            // println!(
+            //     "outp_cluster.mesh.indices len: {}",
+            //     outp_cluster.mesh.indices.len()
+            // );
+
+            let (read_cluster, roffset) = read.get_cluster_w_offset(&(idx as u32)).unwrap();
+            // println!("read_offset: {}, out_offset: {}", roffset, ooffset);
+            // println!("read pos len: {}", read_cluster.pos.len());
+            // println!("read_cluster.idx: {}", read_cluster.idx.len());
+
+            let idx_equal = compare_vecs_w_order(&read_cluster.pos, &outp_cluster.mesh.positions);
+            let pos_equal = compare_vecs_w_order(&read_cluster.idx, &outp_cluster.mesh.indices);
+
+            // println!("pos: {}\nidx: {}\n\n", pos_equal, idx_equal);
+
+            assert!(roffset == ooffset as u32);
+            assert!(pos_equal);
+            assert!(idx_equal);
+        }
     }
 
     return ();
