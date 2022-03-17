@@ -20,7 +20,7 @@ pub struct CTreeNode {
     pub lod: u32,
 
     // TEMP
-    pub offset: u32
+    pub offset: u32,
 }
 
 impl CTree {
@@ -49,7 +49,7 @@ impl CTree {
                 parents: [u32::MAX, u32::MAX],
                 children: [u32::MAX, u32::MAX, u32::MAX, u32::MAX],
                 lod: 0,
-                offset: 0
+                offset: 0,
             });
         }
 
@@ -78,7 +78,7 @@ impl CTree {
             parents: *parent_ids,
             children: *children_ids,
             lod: *lod_map.last().unwrap_or(&0),
-            offset: 0
+            offset: 0,
         });
 
         for child_id in children_ids {
@@ -129,11 +129,12 @@ impl CTree {
     }
 
     pub fn write_to_file(&mut self, file_name: &str) {
-        let u32_size = mem::size_of::<u32>();
-
-        let mut write_file = File::create(format!("./output/{}", file_name)).unwrap();
-        let mut cluster_buffer = Vec::with_capacity(self.clusters.len() * u32_size * 4 * 384);
-        let mut node_buffer = Vec::with_capacity(self.nodes.len() * u32_size * 5);
+        let mut cluster_buffer = Vec::with_capacity(
+            self.clusters.len()
+                * (mem::size_of::<u32>() * 128 * 3 + mem::size_of::<f32>() * 128 * 2),
+        );
+        let mut node_buffer =
+            Vec::with_capacity(self.nodes.len() * mem::size_of::<interop::Node>());
         let mut offsets = Vec::with_capacity(self.clusters.len());
 
         let mut offset = 0;
@@ -162,7 +163,8 @@ impl CTree {
         }
 
         // TODO should these be sorted so the highest parents are the first ones then you can split from there?
-        let cluster_offset = self.nodes.len() * u32_size * 5 + u32_size;
+        let cluster_offset =
+            self.nodes.len() * mem::size_of::<interop::Node>() + mem::size_of::<u32>();
         for node in &mut self.nodes {
             /*
             cluster: u32,
@@ -185,6 +187,8 @@ impl CTree {
 
         self.offsets = offsets;
 
+        let mut write_file = File::create(format!("./output/{}", file_name)).unwrap();
+        
         // write number of nodes
         write_file
             .write_all(&(self.nodes.len() as u32).to_le_bytes())
@@ -192,7 +196,7 @@ impl CTree {
 
         write_file.write_all(&node_buffer).unwrap();
 
-        assert!(cluster_offset == node_buffer.len() + 4);
+        assert!(cluster_offset == node_buffer.len() + mem::size_of::<u32>());
 
         // write the number of clusters
         // write_file
@@ -225,7 +229,7 @@ impl TempCTree {
                 parents: [u32::MAX, u32::MAX],
                 children: [u32::MAX, u32::MAX, u32::MAX, u32::MAX],
                 lod: 0,
-                offset: 0
+                offset: 0,
             });
         }
 
@@ -255,7 +259,7 @@ impl TempCTree {
             parents: *parent_ids,
             children: *children_ids,
             lod,
-            offset: 0
+            offset: 0,
         });
 
         for child_id in children_ids {

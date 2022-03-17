@@ -6,4 +6,10 @@
 //     }
 // }
 
+use interop;
+
 pub mod reader;
+
+pub type Cluster = interop::Cluster;
+pub type Node = interop::Cluster;
+
