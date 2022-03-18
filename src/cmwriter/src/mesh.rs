@@ -1,4 +1,5 @@
 use crate::utils::*;
+use crate::cluster::get_order_accurate_tri;
 use core::panic;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -34,7 +35,8 @@ pub fn simplify(
             indices: mesh.indices.clone(),
         };
 
-        let (edges, tris, vertices) = generate_data_structures(&incident_mesh.indices);
+        let (edges, tris, vertices, (vertex_map, tri_list)) =
+            generate_data_structures(&incident_mesh.indices);
 
         // Every cluster has their own list of positions
 
@@ -60,6 +62,7 @@ pub fn simplify(
             // }
         }
 
+        // TODO
         let mut tri_dict = HashMap::new();
         for tri in &tris {
             {
@@ -92,7 +95,16 @@ pub fn simplify(
 
         collapsible.sort_by(|one, two| one.0.partial_cmp(&two.0).unwrap());
 
-        (incident_mesh, vertices, tris, edges, collapsible, tri_dict)
+        (
+            incident_mesh,
+            vertices,
+            tris,
+            edges,
+            collapsible,
+            tri_dict,
+            vertex_map,
+            tri_list,
+        )
     };
 
     // let mut flipped_count = 0;
@@ -104,6 +116,8 @@ pub fn simplify(
         mut edges,
         mut collapsible,
         mut tri_dict,
+        vertex_map,
+        tri_list,
     ) = generate_necessary(mesh, positions);
 
     while incident_mesh.indices.len() > (target_tris * 3) as usize {
@@ -598,6 +612,8 @@ pub fn simplify(
                 mut t_edges,
                 t_collapsible,
                 mut t_tri_dict,
+                vertex_map,
+                tri_list,
             ) = generate_necessary(&incident_mesh, positions);
 
             // let mesh_positions;
@@ -849,11 +865,20 @@ pub fn generate_data_structures(
     HashMap<Edge, [u32; 2]>,
     HashSet<Triangle>,
     HashMap<u32, Vec<u32>>,
+    (HashMap<u32, HashSet<usize>>, Vec<Triangle>),
 ) {
     let tri_count = indices.len() / 3;
     let mut edges = HashMap::<Edge, [u32; 2]>::with_capacity(tri_count * 24);
     let mut tris = HashSet::<Triangle>::with_capacity(tri_count);
     let mut vertices: HashMap<u32, Vec<u32>> = HashMap::new();
+
+    let mut vertex_map: HashMap<u32, HashSet<usize>> = HashMap::new();
+    let mut tri_list: Vec<Triangle> = Vec::with_capacity(indices.len() / 3);
+
+    // indices
+    //     .chunks_exact(3)
+    //     .map(|tri| [tri[0], tri[1], tri[2]])
+    //     .collect();
 
     // SECTION - Fill vertices, tris, edges and boundary edges
     {
@@ -863,6 +888,27 @@ pub fn generate_data_structures(
             let idx0 = indices[idx + 0];
             let idx1 = indices[idx + 1];
             let idx2 = indices[idx + 2];
+
+            let tri_idx = tri_list.len();
+            tri_list.push([idx0, idx1, idx2]);
+            if let Some(tlist) = vertex_map.get_mut(&idx0) {
+                tlist.insert(tri_idx);
+            } else {
+                vertex_map.insert(idx0, HashSet::new());
+                vertex_map.get_mut(&idx0).unwrap().insert(tri_idx);
+            }
+            if let Some(tlist) = vertex_map.get_mut(&idx1) {
+                tlist.insert(tri_idx);
+            } else {
+                vertex_map.insert(idx1, HashSet::new());
+                vertex_map.get_mut(&idx1).unwrap().insert(tri_idx);
+            }
+            if let Some(tlist) = vertex_map.get_mut(&idx2) {
+                tlist.insert(tri_idx);
+            } else {
+                vertex_map.insert(idx2, HashSet::new());
+                vertex_map.get_mut(&idx2).unwrap().insert(tri_idx);
+            }
 
             {
                 let key: Edge = new_edge(idx0, idx1);
@@ -960,7 +1006,7 @@ pub fn generate_data_structures(
         kv.1.sort();
     }
 
-    (edges, tris, vertices)
+    (edges, tris, vertices, (vertex_map, tri_list))
 }
 
 // orders the vertices consistently
